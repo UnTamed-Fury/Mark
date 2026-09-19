@@ -1,0 +1,3 @@
+shamefully-hoist=true
+audit=false
+strict-dep-builds=false

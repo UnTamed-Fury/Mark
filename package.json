@@ -1,0 +1,55 @@
+{
+  "name": "animex-mark-bot",
+  "version": "2.0.0",
+  "description": "Unified high-performance cross-platform bot engine for AnimeX across Discord and Fluxer platforms",
+  "type": "module",
+  "main": "dist/index.js",
+  "onlyBuiltDependencies": [
+    "esbuild"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "prebuild": "pnpm clean",
+    "build": "tsc",
+    "start": "node --max-old-space-size=128 dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "keywords": [
+    "discord",
+    "discordjs",
+    "fluxer",
+    "fluxerjs",
+    "animex",
+    "unified",
+    "bot"
+  ],
+  "author": "AnimeX Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/UnTamed-Fury/Mark.git"
+  },
+  "homepage": "https://github.com/UnTamed-Fury/Mark#readme",
+  "bugs": {
+    "url": "https://github.com/UnTamed-Fury/Mark/issues"
+  },
+  "dependencies": {
+    "@fluxerjs/core": "^3.0.0",
+    "discord.js": "^14.27.0",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/ws": "^8.18.1",
+    "railway": "^3.11.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}
