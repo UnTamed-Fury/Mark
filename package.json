@@ -40,7 +40,7 @@
     "url": "https://github.com/UnTamed-Fury/Mark/issues"
   },
   "dependencies": {
-    "@fluxerjs/core": "^3.0.0",
+    "@fluxerjs/core": "^3.1.0",
     "discord.js": "^14.27.0",
     "dotenv": "^17.4.2"
   },
