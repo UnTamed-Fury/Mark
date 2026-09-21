@@ -1,29 +1,62 @@
-import { type Client, type TextChannel, EmbedBuilder } from 'discord.js';
+import { type Client as DiscordClient, EmbedBuilder as DiscordEmbedBuilder } from 'discord.js';
+import { EmbedBuilder as FluxerEmbedBuilder } from '@fluxerjs/core';
 import { config } from '../config.js';
 import { BRAND } from '../constants.js';
 import { drainRecentAfkEvents, getActiveAfkList, formatDuration } from './afkManager.js';
-import { createLogger, getLogsSince } from './logger.js';
+import { createLogger, getLogsAfterId } from './logger.js';
 import { drainRecentSyncEvents, getAllLinks } from './syncManager.js';
+import { getDiscordClient } from '../platforms/discord/client.js';
+import { getFluxerClient } from '../platforms/fluxer/client.js';
 
 const log = createLogger('PeriodicLogger');
 
-let timersStarted = false;
+const COLOR_ERROR = 0xed4245;
+const COLOR_WARN = 0xfee75c;
 
-function splitIntoChunks(text: string, maxChunkLength: number): string[] {
+let timersStarted = false;
+let discordClientInstance: DiscordClient | null = null;
+let lastFlushedLogId = 0;
+const warnedMissingChannels = new Set<string>();
+
+export interface EmbedPayload {
+  title: string;
+  description: string;
+  color: number;
+  timestamp?: Date;
+}
+
+interface UnifiedLogTarget {
+  platform: 'discord' | 'fluxer';
+  channelId: string;
+  sendBatches: (payloads: EmbedPayload[]) => Promise<void>;
+}
+
+export function splitIntoChunks(text: string, maxChunkLength: number): string[] {
   const chunks: string[] = [];
   const lines = text.split('\n');
   let currentChunk = '';
 
   for (const line of lines) {
-    if (currentChunk.length + line.length + 1 > maxChunkLength) {
+    if (line.length > maxChunkLength) {
       if (currentChunk.length > 0) {
         chunks.push(currentChunk.trim());
         currentChunk = '';
       }
-      // If a single line is absurdly long, slice it
-      if (line.length > maxChunkLength) {
-        chunks.push(line.slice(0, maxChunkLength));
-        continue;
+      let remainingLine = line;
+      while (remainingLine.length > maxChunkLength) {
+        chunks.push(remainingLine.slice(0, maxChunkLength));
+        remainingLine = remainingLine.slice(maxChunkLength);
+      }
+      if (remainingLine.length > 0) {
+        currentChunk = remainingLine;
+      }
+      continue;
+    }
+
+    if (currentChunk.length + line.length + 1 > maxChunkLength) {
+      if (currentChunk.length > 0) {
+        chunks.push(currentChunk.trim());
+        currentChunk = '';
       }
     }
     currentChunk += (currentChunk.length > 0 ? '\n' : '') + line;
@@ -36,7 +69,133 @@ function splitIntoChunks(text: string, maxChunkLength: number): string[] {
   return chunks;
 }
 
-export function startPeriodicLogging(client: Client): void {
+export function createEmbedBatches(
+  embedPayloads: EmbedPayload[],
+  maxTotalChars = 5500,
+  maxEmbedsPerMsg = 10
+): EmbedPayload[][] {
+  const batches: EmbedPayload[][] = [];
+  let currentBatch: EmbedPayload[] = [];
+  let currentBatchChars = 0;
+
+  for (const payload of embedPayloads) {
+    const payloadChars = (payload.title?.length || 0) + (payload.description?.length || 0);
+
+    if (
+      currentBatch.length >= maxEmbedsPerMsg ||
+      (currentBatch.length > 0 && currentBatchChars + payloadChars > maxTotalChars)
+    ) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentBatchChars = 0;
+    }
+
+    currentBatch.push(payload);
+    currentBatchChars += payloadChars;
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  return batches;
+}
+
+async function resolveLogTarget(
+  channelId: string | null,
+  channelRoleName: string
+): Promise<UnifiedLogTarget | null> {
+  if (!channelId) return null;
+
+  // 1. Try Discord client
+  const discord = discordClientInstance || getDiscordClient();
+  if (discord && discord.isReady()) {
+    try {
+      const channel = await discord.channels.fetch(channelId);
+      if (channel && channel.isTextBased() && 'send' in channel) {
+        warnedMissingChannels.delete(channelId);
+        return {
+          platform: 'discord',
+          channelId,
+          sendBatches: async (payloads: EmbedPayload[]) => {
+            const batches = createEmbedBatches(payloads);
+            for (let i = 0; i < batches.length; i++) {
+              if (i > 0) {
+                await new Promise((resolve) => setTimeout(resolve, 500));
+              }
+              const embeds = batches[i]!.map((p) => {
+                const eb = new DiscordEmbedBuilder()
+                  .setTitle(p.title)
+                  .setDescription(p.description)
+                  .setColor(p.color);
+                if (p.timestamp) eb.setTimestamp(p.timestamp);
+                return eb;
+              });
+              await (channel as unknown as { send: (opts: { embeds: DiscordEmbedBuilder[] }) => Promise<unknown> }).send({
+                embeds,
+              });
+            }
+          },
+        };
+      }
+    } catch {
+      // Not found on Discord, continue to Fluxer check
+    }
+  }
+
+  // 2. Try Fluxer client
+  const fluxer = getFluxerClient();
+  if (fluxer && fluxer.isReady()) {
+    try {
+      const channel = await fluxer.channels.fetch(channelId);
+      if (channel && channel.isTextBased() && 'send' in channel) {
+        warnedMissingChannels.delete(channelId);
+        return {
+          platform: 'fluxer',
+          channelId,
+          sendBatches: async (payloads: EmbedPayload[]) => {
+            const batches = createEmbedBatches(payloads);
+            for (let i = 0; i < batches.length; i++) {
+              if (i > 0) {
+                await new Promise((resolve) => setTimeout(resolve, 500));
+              }
+              const embeds = batches[i]!.map((p) => {
+                const eb = new FluxerEmbedBuilder()
+                  .setTitle(p.title)
+                  .setDescription(p.description)
+                  .setColor(p.color);
+                if (p.timestamp) eb.setTimestamp(p.timestamp);
+                return eb;
+              });
+              await (channel as unknown as { send: (opts: { embeds: FluxerEmbedBuilder[] }) => Promise<unknown> }).send({
+                embeds,
+              });
+            }
+          },
+        };
+      }
+    } catch {
+      // Not found on Fluxer
+    }
+  }
+
+  // Channel could not be resolved on either platform
+  if (!warnedMissingChannels.has(channelId)) {
+    warnedMissingChannels.add(channelId);
+    log.warn(
+      `Configured ${channelRoleName} ("${channelId}") could not be found or accessed on Discord or Fluxer. ` +
+        `Verify bot permissions ("View Channel" and "Send Messages") and channel ID in .config.mark`
+    );
+  }
+
+  return null;
+}
+
+export function startPeriodicLogging(client?: DiscordClient): void {
+  if (client) {
+    discordClientInstance = client;
+  }
+
   if (timersStarted) return;
   timersStarted = true;
 
@@ -44,28 +203,28 @@ export function startPeriodicLogging(client: Client): void {
   const targetAfkChannelId = config.afkLogChannelId || targetLogChannelId;
   const targetSyncChannelId = config.syncLogChannelId || targetLogChannelId;
 
-  const getChannel = async (id: string | null): Promise<TextChannel | null> => {
-    if (!id) return null;
-    try {
-      const channel = await client.channels.fetch(id);
-      if (channel && channel.isTextBased() && 'send' in channel) {
-        return channel as TextChannel;
-      }
-    } catch {
-      // Channel fetch error
-    }
-    return null;
-  };
-
-  // 1. Every 1 minute: Flush recent system & runtime logs (last 75 seconds / 1.2 min)
+  // 1. Every 1 minute: Flush recent system & runtime logs
   setInterval(async () => {
     try {
-      const channel = await getChannel(targetLogChannelId);
-      if (!channel) return;
+      const rawLogs = getLogsAfterId(lastFlushedLogId);
+      if (rawLogs.length === 0) return;
 
-      const cutoff = Date.now() - 75_000;
-      const recentLogs = getLogsSince(cutoff);
+      lastFlushedLogId = rawLogs[rawLogs.length - 1]!.id;
+
+      // Exclude PeriodicLogger logs to avoid feedback loops
+      const recentLogs = rawLogs.filter((l) => l.context !== 'PeriodicLogger');
       if (recentLogs.length === 0) return;
+
+      const target = await resolveLogTarget(targetLogChannelId, 'log_channel_id');
+      if (!target) return;
+
+      const hasError = recentLogs.some((l) => l.level === 'error');
+      const hasWarn = recentLogs.some((l) => l.level === 'warn');
+      const embedColor = hasError
+        ? COLOR_ERROR
+        : hasWarn
+          ? COLOR_WARN
+          : (config.embedColor || BRAND.color);
 
       const logText = recentLogs
         .map((l) => {
@@ -74,42 +233,37 @@ export function startPeriodicLogging(client: Client): void {
         })
         .join('\n');
 
-      // Split into multi-embeds if description exceeds 3,800 chars
-      const chunks = splitIntoChunks(logText, 3800);
-      const embeds: EmbedBuilder[] = [];
+      const chunks = splitIntoChunks(logText, 1800);
+      const embedPayloads: EmbedPayload[] = chunks.map((chunk, i) => ({
+        title: chunks.length > 1 ? `System Logs (${i + 1}/${chunks.length})` : 'System Logs (Batch)',
+        description: `\`\`\`prolog\n${chunk}\n\`\`\``,
+        color: embedColor,
+        timestamp: new Date(),
+      }));
 
-      const embedColor = config.embedColor || BRAND.color;
-
-      for (let i = 0; i < chunks.length && i < 10; i++) {
-        const chunk = chunks[i]!;
-        const embed = new EmbedBuilder()
-          .setColor(embedColor)
-          .setTitle(chunks.length > 1 ? `System Logs (${i + 1}/${chunks.length})` : 'System Logs (Batch)')
-          .setDescription(`\`\`\`prolog\n${chunk}\n\`\`\``)
-          .setTimestamp();
-        embeds.push(embed);
-      }
-
-      if (embeds.length > 0) {
-        await channel.send({ embeds }).catch(() => {});
+      try {
+        await target.sendBatches(embedPayloads);
+      } catch (err) {
+        log.error(`Failed to dispatch system logs to ${target.platform} channel ${target.channelId}:`, err);
       }
     } catch (err) {
-      log.error('Error in system logs dispatch:', err);
+      log.error('Error in system logs dispatch loop:', err);
     }
   }, (config.logFlushIntervalSec || 60) * 1000).unref();
 
   // 2. AFK Activity Summary
   setInterval(async () => {
     try {
-      const channel = await getChannel(targetAfkChannelId);
-      if (!channel) return;
-
       const events = drainRecentAfkEvents();
       const activeAfks = getActiveAfkList();
 
-      if (events.length === 0 && activeAfks.length === 0) {
+      // Only send summary if there was actual AFK activity during this window
+      if (events.length === 0) {
         return;
       }
+
+      const target = await resolveLogTarget(targetAfkChannelId, 'afk_log_channel_id');
+      if (!target) return;
 
       const setList = events.filter((e) => e.type === 'set');
       const clearedList = events.filter((e) => e.type === 'cleared');
@@ -133,15 +287,20 @@ export function startPeriodicLogging(client: Client): void {
       }
 
       const embedColor = config.embedColor || BRAND.color;
-      const embed = new EmbedBuilder()
-        .setColor(embedColor)
-        .setTitle('AFK Activity Summary')
-        .setDescription(lines.join('\n'))
-        .setTimestamp();
+      const embedPayload: EmbedPayload = {
+        title: 'AFK Activity Summary',
+        description: lines.join('\n'),
+        color: embedColor,
+        timestamp: new Date(),
+      };
 
-      await channel.send({ embeds: [embed] }).catch(() => {});
+      try {
+        await target.sendBatches([embedPayload]);
+      } catch (err) {
+        log.error(`Failed to dispatch AFK summary to ${target.platform} channel ${target.channelId}:`, err);
+      }
     } catch (err) {
-      log.error('Error in AFK logs dispatch:', err);
+      log.error('Error in AFK logs dispatch loop:', err);
     }
   }, (config.afkSummaryIntervalSec || 300) * 1000).unref();
 
@@ -152,15 +311,15 @@ export function startPeriodicLogging(client: Client): void {
   setTimeout(() => {
     const runSyncSummary = async () => {
       try {
-        const channel = await getChannel(targetSyncChannelId);
-        if (!channel) return;
-
         const events = drainRecentSyncEvents();
         const allLinks = getAllLinks();
 
         if (events.length === 0) {
           return;
         }
+
+        const target = await resolveLogTarget(targetSyncChannelId, 'sync_log_channel_id');
+        if (!target) return;
 
         const lines: string[] = [];
         lines.push(`• **Total Linked Accounts**: ${allLinks.length}`);
@@ -170,15 +329,20 @@ export function startPeriodicLogging(client: Client): void {
         }
 
         const embedColor = config.embedColor || BRAND.color;
-        const embed = new EmbedBuilder()
-          .setColor(embedColor)
-          .setTitle('Account Sync Activity Summary')
-          .setDescription(lines.join('\n'))
-          .setTimestamp();
+        const embedPayload: EmbedPayload = {
+          title: 'Account Sync Activity Summary',
+          description: lines.join('\n'),
+          color: embedColor,
+          timestamp: new Date(),
+        };
 
-        await channel.send({ embeds: [embed] }).catch(() => {});
+        try {
+          await target.sendBatches([embedPayload]);
+        } catch (err) {
+          log.error(`Failed to dispatch sync summary to ${target.platform} channel ${target.channelId}:`, err);
+        }
       } catch (err) {
-        log.error('Error in sync logs dispatch:', err);
+        log.error('Error in sync logs dispatch loop:', err);
       }
     };
 
@@ -187,5 +351,7 @@ export function startPeriodicLogging(client: Client): void {
     setInterval(runSyncSummary, syncIntervalMs).unref();
   }, syncOffsetMs).unref();
 
-  log.info(`Periodic loggers initialized (Flush: ${config.logFlushIntervalSec}s, AFK: ${config.afkSummaryIntervalSec}s, Sync: ${config.syncSummaryIntervalSec}s)`);
+  log.info(
+    `Periodic loggers initialized (Flush: ${config.logFlushIntervalSec}s, AFK: ${config.afkSummaryIntervalSec}s, Sync: ${config.syncSummaryIntervalSec}s)`
+  );
 }

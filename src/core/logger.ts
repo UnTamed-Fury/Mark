@@ -84,8 +84,9 @@ export class Logger {
     const fullText = `${message}${formattedArgs}`;
     writeLogToFile(level, `${tag} ${fullText}`);
 
-    // Buffer in memory for 1-minute periodic Discord log streaming
+    // Buffer in memory for periodic log streaming
     recentLogEntries.push({
+      id: ++logSequence,
       timestamp: Date.now(),
       level,
       context: this.context,
@@ -99,17 +100,27 @@ export class Logger {
 }
 
 export interface LogEntry {
+  readonly id: number;
   readonly timestamp: number;
   readonly level: LogLevel;
   readonly context: string;
   readonly message: string;
 }
 
+let logSequence = 0;
 const MAX_LOG_BUFFER = 500;
 const recentLogEntries: LogEntry[] = [];
 
 export function getLogsSince(cutoffMs: number): LogEntry[] {
   return recentLogEntries.filter((e) => e.timestamp >= cutoffMs);
+}
+
+export function getLogsAfterId(lastId: number): LogEntry[] {
+  return recentLogEntries.filter((e) => e.id > lastId);
+}
+
+export function getLastLogId(): number {
+  return logSequence;
 }
 
 export function createLogger(context: string): Logger {
