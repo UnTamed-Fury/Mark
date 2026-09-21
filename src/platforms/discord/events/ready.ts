@@ -1,6 +1,7 @@
 import { ActivityType, type Client } from 'discord.js';
 import { config } from '../../../config.js';
 import { createLogger } from '../../../core/logger.js';
+import { startPeriodicLogging } from '../../../core/periodicLogger.js';
 
 const log = createLogger('DiscordReady');
 
@@ -19,4 +20,7 @@ export function handleDiscordReady(client: Client): void {
     ],
     status: 'online',
   });
+
+  startPeriodicLogging(client);
 }
+

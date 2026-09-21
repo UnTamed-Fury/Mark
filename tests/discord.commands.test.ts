@@ -50,6 +50,8 @@ describe('Discord Commands Registry and Executors', () => {
     expect(commandNames).toContain('ticket');
     expect(commandNames).toContain('download');
     expect(commandNames).toContain('ping');
+    expect(commandNames).toContain('afk');
+    expect(commandNames).toContain('sync');
     expect(commandNames).toContain('faq');
     expect(commandNames).toContain('help');
   });
@@ -58,6 +60,8 @@ describe('Discord Commands Registry and Executors', () => {
     expect(getDiscordCommand('site')?.name).toBe('website');
     expect(getDiscordCommand('kissasian')?.name).toBe('drama');
     expect(getDiscordCommand('nineanime')?.name).toBe('9anime');
+    expect(getDiscordCommand('brb')?.name).toBe('afk');
+    expect(getDiscordCommand('link')?.name).toBe('sync');
     expect(getDiscordCommand('perks')?.name).toBe('boost');
     expect(getDiscordCommand('rule')?.name).toBe('rules');
     expect(getDiscordCommand('info')?.name).toBe('anime');

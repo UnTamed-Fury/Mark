@@ -1,5 +1,13 @@
 import type { Message } from 'discord.js';
 import { config } from '../../../config.js';
+import {
+  clearAfk,
+  getAfk,
+  canNotifyAfk,
+  recordAfkNotification,
+  formatDuration,
+  getRelativeTimestamp,
+} from '../../../core/afkManager.js';
 import { isWebsiteQuery } from '../../../core/autoResponder.js';
 import { checkCooldown, recordCommandExecution } from '../../../core/cooldown.js';
 import { createLogger } from '../../../core/logger.js';
@@ -19,18 +27,6 @@ export async function handleDiscordMessageCreate(message: Message): Promise<void
   const mentionPrefix = botId ? `<@${botId}>` : null;
   const nickMentionPrefix = botId ? `<@!${botId}>` : null;
 
-  // Check if content is empty (indicates missing Message Content Intent in Discord Developer Portal)
-  if (content.length === 0) {
-    if (botId && message.mentions.users.has(botId)) {
-      log.warn(`Received empty mention message from ${message.author.tag}. Ensure "Message Content Intent" is enabled in Discord Developer Portal.`);
-      const embed = createBrandEmbed(message)
-        .setTitle('AnimeX Bot')
-        .setDescription(`Hello <@${message.author.id}>! Use \`${config.prefix}help\` to see available commands.`);
-      await sendEmbed(message, embed).catch(() => {});
-    }
-    return;
-  }
-
   let commandBody: string | null = null;
 
   if (content.startsWith(config.prefix)) {
@@ -40,6 +36,56 @@ export async function handleDiscordMessageCreate(message: Message): Promise<void
   } else if (nickMentionPrefix && content.startsWith(nickMentionPrefix)) {
     commandBody = content.slice(nickMentionPrefix.length).trim();
   }
+
+  const rawArgs = commandBody !== null ? commandBody.split(/\s+/) : [];
+  const commandName = rawArgs[0]?.toLowerCase();
+  const isAfkCommand = commandName === 'afk' || commandName === 'brb' || commandName === 'away';
+
+  // 1. If author was AFK, remove their AFK status (unless they are executing +afk)
+  if (!isAfkCommand) {
+    const cleared = clearAfk(message.author.id, 'discord', message.guildId);
+    if (cleared) {
+      const duration = formatDuration(Date.now() - cleared.timestamp);
+      const embed = createBrandEmbed(message)
+        .setTitle('Welcome Back!')
+        .setDescription(
+          `Welcome back <@${message.author.id}>, I removed your AFK status.\n\n` +
+          `• **AFK Duration**: ${duration}\n` +
+          `• **Reason**: ${cleared.reason}`
+        );
+      await sendEmbed(message, embed).catch(() => {});
+    }
+  }
+
+  // 2. Notify if any mentioned or replied-to users are AFK
+  const targetsToCheck = new Set<string>();
+  for (const [userId, user] of message.mentions.users) {
+    if (userId !== message.author.id && !user.bot) {
+      targetsToCheck.add(userId);
+    }
+  }
+  if (message.reference?.messageId && message.mentions.repliedUser) {
+    const replied = message.mentions.repliedUser;
+    if (replied.id !== message.author.id && !replied.bot) {
+      targetsToCheck.add(replied.id);
+    }
+  }
+
+  for (const targetId of targetsToCheck) {
+    const afkEntry = getAfk(targetId, 'discord', message.guildId);
+    if (afkEntry && canNotifyAfk(targetId, message.channelId)) {
+      recordAfkNotification(targetId, message.channelId);
+      const relativeTime = getRelativeTimestamp(afkEntry.timestamp);
+      const targetUser = message.mentions.users.get(targetId);
+      const displayName = targetUser?.displayName || targetUser?.username || 'User';
+
+      const embed = createBrandEmbed(message)
+        .setTitle(`${displayName} is AFK`)
+        .setDescription(`<@${targetId}> is currently AFK: **${afkEntry.reason}** (${relativeTime})`);
+      await sendEmbed(message, embed).catch(() => {});
+    }
+  }
+
 
   // Handle prefix & mention commands
   if (commandBody !== null) {

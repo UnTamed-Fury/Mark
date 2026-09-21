@@ -81,10 +81,38 @@ export class Logger {
             .map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a)))
             .join(' ')}`
         : '';
-    writeLogToFile(level, `${tag} ${message}${formattedArgs}`);
+    const fullText = `${message}${formattedArgs}`;
+    writeLogToFile(level, `${tag} ${fullText}`);
+
+    // Buffer in memory for 1-minute periodic Discord log streaming
+    recentLogEntries.push({
+      timestamp: Date.now(),
+      level,
+      context: this.context,
+      message: fullText,
+    });
+
+    if (recentLogEntries.length > MAX_LOG_BUFFER) {
+      recentLogEntries.splice(0, recentLogEntries.length - MAX_LOG_BUFFER);
+    }
   }
+}
+
+export interface LogEntry {
+  readonly timestamp: number;
+  readonly level: LogLevel;
+  readonly context: string;
+  readonly message: string;
+}
+
+const MAX_LOG_BUFFER = 500;
+const recentLogEntries: LogEntry[] = [];
+
+export function getLogsSince(cutoffMs: number): LogEntry[] {
+  return recentLogEntries.filter((e) => e.timestamp >= cutoffMs);
 }
 
 export function createLogger(context: string): Logger {
   return new Logger(context);
 }
+

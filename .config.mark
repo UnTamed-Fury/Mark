@@ -1,16 +1,15 @@
-# Mark Bot - Configuration File
-# Non-sensitive bot and server configuration settings.
-# For sensitive credentials (bot tokens), use .env instead.
-# For local developer overrides, use .config.mark.local
+owner_id: "1344082654852550788"
 
-PREFIX=+
+servers:
+  discord_server_id: "1320161905267970079"
+  fluxer_server_id: "1475654458820477346"
+  test_server_id: ""
+  log_server_id: ""
+  fluxer_api_url: ""
 
-# Server Guild IDs
-DISCORD_SERVER_ID=1320161905267970079
-FLUXER_SERVER_ID=1475654458820477346
-FLUXER_API_URL=
-
-# Core IDs & Channels
-OWNER_ID=1344082654852550788
-RULES_CHANNEL_ID=1320161905402318853
-TICKET_CHANNEL_ID=1320161905695789095
+channels:
+  rules_channel_id: "1320161905402318853"
+  ticket_channel_id: "1320161905695789095"
+  log_channel_id: ""
+  afk_log_channel_id: ""
+  sync_log_channel_id: ""

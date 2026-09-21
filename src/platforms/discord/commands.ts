@@ -1,4 +1,12 @@
-import { Collection, type Message } from 'discord.js';
+import {
+  Collection,
+  type Message,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ComponentType,
+  type ButtonInteraction,
+} from 'discord.js';
 import { config } from '../../config.js';
 import { BRAND } from '../../constants.js';
 import {
@@ -15,7 +23,11 @@ import {
   getTicketCommandBody,
   PING_COMMAND_META,
   calculatePingDetails,
+  AFK_COMMAND_META,
+  SYNC_COMMAND_META,
 } from '../../core/commandsData.js';
+import { setAfk, getRelativeTimestamp, type AfkScope } from '../../core/afkManager.js';
+import { createSyncCode, claimSyncCode, getLinkedFluxerId } from '../../core/syncManager.js';
 import { FAQ_ENTRIES, faqByCategory, isKnownCategory } from '../../core/faqData.js';
 import { createLogger } from '../../core/logger.js';
 import { createBrandEmbed, sendEmbed } from './embeds.js';
@@ -200,6 +212,150 @@ const helpCommand: DiscordCommand = {
   },
 };
 
+const afkCommand: DiscordCommand = {
+  name: AFK_COMMAND_META.name,
+  aliases: AFK_COMMAND_META.aliases,
+  description: AFK_COMMAND_META.description,
+  async execute(message: Message, args: string[]): Promise<void> {
+    const reason = args.join(' ').trim() || 'AFK';
+    const serverName = message.guild?.name ?? 'this server';
+
+    const embed = createBrandEmbed(message)
+      .setTitle('AFK Configuration')
+      .setDescription(
+        `Choose your AFK scope below for reason: **${reason}**\n\n` +
+        `🌐 **Global AFK**: Set AFK across all servers (Discord & Fluxer).\n` +
+        `🏠 **Server Only**: Set AFK only in **${serverName}**.\n` +
+        `❌ **Cancel**: Cancel AFK setup.`
+      );
+
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`afk_global_${message.author.id}`)
+        .setLabel('Global AFK')
+        .setEmoji('🌐')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`afk_server_${message.author.id}`)
+        .setLabel('Server Only')
+        .setEmoji('🏠')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`afk_cancel_${message.author.id}`)
+        .setLabel('Cancel')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Danger),
+    );
+
+    const promptMsg = await message.reply({
+      embeds: [embed],
+      components: [row],
+      allowedMentions: { repliedUser: false },
+    });
+
+    try {
+      const interaction = await promptMsg.awaitMessageComponent({
+        filter: (i: ButtonInteraction) => {
+          if (i.user.id !== message.author.id) {
+            i.reply({ content: 'This AFK prompt is not for you.', ephemeral: true }).catch(() => {});
+            return false;
+          }
+          return i.customId.startsWith('afk_');
+        },
+        componentType: ComponentType.Button,
+        time: 60_000,
+      });
+
+      if (interaction.customId.startsWith('afk_cancel_')) {
+        const cancelEmbed = createBrandEmbed(message)
+          .setTitle('AFK Cancelled')
+          .setDescription('AFK setup was cancelled.');
+        await interaction.update({ embeds: [cancelEmbed], components: [] });
+        return;
+      }
+
+      const scope: AfkScope = interaction.customId.startsWith('afk_global_') ? 'global' : 'server';
+      const entry = setAfk(message.author.id, scope, 'discord', message.guildId, message.guild?.name, reason);
+      const relativeTime = getRelativeTimestamp(entry.timestamp);
+      const scopeLabel = scope === 'global' ? 'globally' : `in **${serverName}**`;
+
+      const successEmbed = createBrandEmbed(message)
+        .setTitle(`${message.author.displayName || message.author.username} is now AFK`)
+        .setDescription(
+          `You are now set as AFK ${scopeLabel}.\n\n` +
+          `• **Reason**: ${entry.reason}\n` +
+          `• **Started**: ${relativeTime}`
+        );
+
+      await interaction.update({ embeds: [successEmbed], components: [] });
+    } catch {
+      // Timeout after 60s
+      await promptMsg.edit({ components: [] }).catch(() => {});
+    }
+  },
+};
+
+const syncCommand: DiscordCommand = {
+  name: SYNC_COMMAND_META.name,
+  aliases: SYNC_COMMAND_META.aliases,
+  description: SYNC_COMMAND_META.description,
+  async execute(message: Message, args: string[]): Promise<void> {
+    const codeArg = args[0]?.trim();
+
+    if (!codeArg) {
+      const existing = getLinkedFluxerId(message.author.id);
+      if (existing) {
+        const embed = createBrandEmbed(message)
+          .setTitle('Account Already Linked')
+          .setDescription(
+            `Your Discord account is currently linked to Fluxer ID: \`${existing}\`.\n\n` +
+            `To re-link, run \`${config.prefix}sync <code>\` with a code generated from Fluxer.`
+          );
+        await sendEmbed(message, embed);
+        return;
+      }
+
+      const code = createSyncCode(message.author.id, 'discord');
+      const tempEmbed = createBrandEmbed(message)
+        .setTitle('Account Sync Code')
+        .setDescription(
+          `Your one-time link code is:\n\n` +
+          `# \`${code}\`\n\n` +
+          `Go to **Fluxer** within **30 seconds** and send:\n` +
+          `\`${config.prefix}sync ${code}\`\n\n` +
+          `*(This message will auto-delete in 30 seconds for security).*`
+        );
+
+      const sentMsg = await message.reply({
+        embeds: [tempEmbed],
+        allowedMentions: { repliedUser: false },
+      });
+
+      setTimeout(() => {
+        sentMsg.delete().catch(() => {});
+      }, 30_000);
+      return;
+    }
+
+    const result = claimSyncCode(codeArg, message.author.id, 'discord');
+    if (!result.success) {
+      const errorEmbed = createBrandEmbed(message)
+        .setTitle('Sync Failed')
+        .setDescription(result.message);
+      await sendEmbed(message, errorEmbed);
+      return;
+    }
+
+    const successEmbed = createBrandEmbed(message)
+      .setTitle('Account Linked Successfully!')
+      .setDescription(
+        `🎉 Successfully linked your Discord account with Fluxer ID \`${result.link?.fluxerId}\`!\n\n` +
+        `Your **Global AFK** status will now seamlessly synchronize across both platforms.`
+      );
+    await sendEmbed(message, successEmbed);
+  },
+};
+
 export const COMMANDS: readonly DiscordCommand[] = [
   websiteCommand,
   dramaCommand,
@@ -210,6 +366,8 @@ export const COMMANDS: readonly DiscordCommand[] = [
   ticketCommand,
   downloadCommand,
   pingCommand,
+  afkCommand,
+  syncCommand,
   faqCommand,
   helpCommand,
 ];
