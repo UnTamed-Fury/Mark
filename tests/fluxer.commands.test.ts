@@ -50,6 +50,7 @@ describe('Fluxer Commands Registry and Executors', () => {
     expect(commandNames).toContain('ticket');
     expect(commandNames).toContain('download');
     expect(commandNames).toContain('ping');
+    expect(commandNames).toContain('afk');
     expect(commandNames).toContain('faq');
     expect(commandNames).toContain('help');
   });
@@ -58,6 +59,7 @@ describe('Fluxer Commands Registry and Executors', () => {
     expect(getFluxerCommand('site')?.name).toBe('website');
     expect(getFluxerCommand('kissasian')?.name).toBe('drama');
     expect(getFluxerCommand('nineanime')?.name).toBe('9anime');
+    expect(getFluxerCommand('brb')?.name).toBe('afk');
     expect(getFluxerCommand('perks')?.name).toBe('boost');
     expect(getFluxerCommand('rule')?.name).toBe('rules');
     expect(getFluxerCommand('info')?.name).toBe('anime');

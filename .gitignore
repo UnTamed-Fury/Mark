@@ -34,3 +34,5 @@ Thumbs.db
 *.zip
 coverage/
 *docs/
+data/
+

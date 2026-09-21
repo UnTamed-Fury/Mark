@@ -15,7 +15,9 @@ import {
   getTicketCommandBody,
   PING_COMMAND_META,
   calculatePingDetails,
+  AFK_COMMAND_META,
 } from '../../core/commandsData.js';
+import { setAfk, getRelativeTimestamp, type AfkScope } from '../../core/afkManager.js';
 import { FAQ_ENTRIES, faqByCategory, isKnownCategory } from '../../core/faqData.js';
 import { createLogger } from '../../core/logger.js';
 import { createFluxerBrandEmbed, sendFluxerEmbed } from './embeds.js';
@@ -200,6 +202,68 @@ const helpCommand: FluxerCommand = {
   },
 };
 
+const afkCommand: FluxerCommand = {
+  name: AFK_COMMAND_META.name,
+  aliases: AFK_COMMAND_META.aliases,
+  description: AFK_COMMAND_META.description,
+  async execute(message: Message, args: string[]): Promise<void> {
+    const reason = args.join(' ').trim() || 'AFK';
+    const serverName = 'this server';
+
+    const embed = createFluxerBrandEmbed(message)
+      .setTitle('AFK Configuration')
+      .setDescription(
+        `React below to choose your AFK scope for reason: **${reason}**\n\n` +
+        `🌐 **Global AFK**: Set AFK across all servers (Discord & Fluxer).\n` +
+        `🏠 **Server Only**: Set AFK only in this server.\n` +
+        `❌ **Cancel**: Cancel AFK setup.`
+      );
+
+    const promptMsg = await sendFluxerEmbed(message, embed);
+
+    await promptMsg.react('🌐').catch(() => {});
+    await promptMsg.react('🏠').catch(() => {});
+    await promptMsg.react('❌').catch(() => {});
+
+    try {
+      const reactions = await promptMsg.awaitReactions({
+        filter: (reaction, user) =>
+          user.id === message.author.id && ['🌐', '🏠', '❌'].includes(reaction.emoji.name ?? ''),
+        max: 1,
+        time: 60_000,
+      });
+
+      const collected = reactions.first();
+      const emojiName = collected?.reaction.emoji.name;
+
+      if (!emojiName || emojiName === '❌') {
+        const cancelEmbed = createFluxerBrandEmbed(message)
+          .setTitle('AFK Cancelled')
+          .setDescription('AFK setup was cancelled.');
+        await promptMsg.edit({ embeds: [cancelEmbed] }).catch(() => {});
+        return;
+      }
+
+      const scope: AfkScope = emojiName === '🌐' ? 'global' : 'server';
+      const entry = setAfk(message.author.id, scope, 'fluxer', message.guildId, serverName, reason);
+      const relativeTime = getRelativeTimestamp(entry.timestamp);
+      const scopeLabel = scope === 'global' ? 'globally' : `in **${serverName}**`;
+
+      const successEmbed = createFluxerBrandEmbed(message)
+        .setTitle(`${message.author.username} is now AFK`)
+        .setDescription(
+          `You are now set as AFK ${scopeLabel}.\n\n` +
+          `• **Reason**: ${entry.reason}\n` +
+          `• **Started**: ${relativeTime}`
+        );
+
+      await promptMsg.edit({ embeds: [successEmbed] }).catch(() => {});
+    } catch {
+      // Timeout after 60s
+    }
+  },
+};
+
 export const COMMANDS: readonly FluxerCommand[] = [
   websiteCommand,
   dramaCommand,
@@ -210,6 +274,7 @@ export const COMMANDS: readonly FluxerCommand[] = [
   ticketCommand,
   downloadCommand,
   pingCommand,
+  afkCommand,
   faqCommand,
   helpCommand,
 ];

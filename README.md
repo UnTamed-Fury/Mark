@@ -27,6 +27,7 @@ A high-performance, cross-platform utility bot for AnimeX across **Discord** (`d
 | `+ticket` | `support`, `tickets`, `contact`, `helpdesk`, `issue` | Support tickets channel |
 | `+download` | `downloads`, `dl`, `save` | Download guide and batch drive instructions |
 | `+ping` | `latency`, `ms`, `pong` | WebSocket connection latency |
+| `+afk [reason]` | `brb`, `away` | Sets AFK status with interactive Global/Server selection |
 | `+faq [category]` | `questions`, `qna`, `ask` | 11 FAQ categories or full FAQ index |
 | `+help [command]` | `h`, `commands`, `cmd`, `cmds` | Command list or specific command documentation |
 

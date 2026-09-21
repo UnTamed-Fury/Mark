@@ -141,3 +141,10 @@ export function calculatePingDetails(wsPing: number): { emoji: string; text: str
   const statusEmoji = wsPing < 0 ? '🟢' : wsPing < 150 ? '🟢' : wsPing < 300 ? '🟡' : '🔴';
   return { emoji: statusEmoji, text: pingText };
 }
+
+export const AFK_COMMAND_META = {
+  name: 'afk',
+  aliases: ['brb', 'away'],
+  description: 'Sets your status as AFK with a reason. Notifies users when mentioned.',
+} as const;
+
