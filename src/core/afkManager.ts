@@ -26,7 +26,19 @@ export interface AfkActivityEvent {
   readonly durationMs?: number;
 }
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+import { config } from '../config.js';
+
+function resolveDataDir(): string {
+  if (process.env.DATA_DIR && fs.existsSync(process.env.DATA_DIR)) {
+    return process.env.DATA_DIR;
+  }
+  if (fs.existsSync('/data')) {
+    return '/data';
+  }
+  return path.resolve(process.cwd(), 'data');
+}
+
+const DATA_DIR = resolveDataDir();
 const AFK_FILE = path.join(DATA_DIR, 'afk.json');
 
 // Memory cache:
@@ -36,7 +48,7 @@ const afkStore = new Map<string, AfkUserEntry>();
 
 // Anti-spam notification cooldown: key = `${targetUserId}:${channelId}`
 const afkNotifyCooldowns = new Map<string, number>();
-const NOTIFY_COOLDOWN_MS = 10_000;
+const NOTIFY_COOLDOWN_MS = (config.afkMentionCooldownSec || 10) * 1000;
 
 // Recent AFK activity buffer (for 5-min batch logs)
 const recentAfkEvents: AfkActivityEvent[] = [];
@@ -285,7 +297,7 @@ export function clearAllAfk(): void {
 // Initial load
 loadAfkStore();
 
-// Regular 30-minute cleanup cycle to prevent data bloat
+// Regular cleanup cycle to prevent data bloat
 setInterval(() => {
   purgeHistoricalData();
-}, 30 * 60_000).unref();
+}, (config.afkCleanupIntervalMin || 30) * 60_000).unref();

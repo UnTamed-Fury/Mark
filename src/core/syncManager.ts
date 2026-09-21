@@ -25,9 +25,21 @@ interface PendingSyncCode {
   readonly expiresAt: number;
 }
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+import { config } from '../config.js';
+
+function resolveDataDir(): string {
+  if (process.env.DATA_DIR && fs.existsSync(process.env.DATA_DIR)) {
+    return process.env.DATA_DIR;
+  }
+  if (fs.existsSync('/data')) {
+    return '/data';
+  }
+  return path.resolve(process.cwd(), 'data');
+}
+
+const DATA_DIR = resolveDataDir();
 const SYNC_FILE = path.join(DATA_DIR, 'sync.json');
-const CODE_LIFETIME_MS = 30_000; // 30 seconds (like 2FA TOTP)
+const CODE_LIFETIME_MS = (config.syncCodeExpirySec || 30) * 1000; // Configurable (default 30s)
 
 // Maps:
 // discordId -> UserLink

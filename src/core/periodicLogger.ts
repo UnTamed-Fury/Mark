@@ -78,11 +78,13 @@ export function startPeriodicLogging(client: Client): void {
       const chunks = splitIntoChunks(logText, 3800);
       const embeds: EmbedBuilder[] = [];
 
+      const embedColor = config.embedColor || BRAND.color;
+
       for (let i = 0; i < chunks.length && i < 10; i++) {
         const chunk = chunks[i]!;
         const embed = new EmbedBuilder()
-          .setColor(BRAND.color)
-          .setTitle(chunks.length > 1 ? `System Logs (${i + 1}/${chunks.length})` : 'System Logs (1-Min Batch)')
+          .setColor(embedColor)
+          .setTitle(chunks.length > 1 ? `System Logs (${i + 1}/${chunks.length})` : 'System Logs (Batch)')
           .setDescription(`\`\`\`prolog\n${chunk}\n\`\`\``)
           .setTimestamp();
         embeds.push(embed);
@@ -92,11 +94,11 @@ export function startPeriodicLogging(client: Client): void {
         await channel.send({ embeds }).catch(() => {});
       }
     } catch (err) {
-      log.error('Error in 1-minute system logs dispatch:', err);
+      log.error('Error in system logs dispatch:', err);
     }
-  }, 60_000).unref();
+  }, (config.logFlushIntervalSec || 60) * 1000).unref();
 
-  // 2. Every 5 minutes: AFK Activity Summary
+  // 2. AFK Activity Summary
   setInterval(async () => {
     try {
       const channel = await getChannel(targetAfkChannelId);
@@ -116,33 +118,37 @@ export function startPeriodicLogging(client: Client): void {
       lines.push(`• **Active AFKs**: ${activeAfks.length} user(s)`);
 
       if (setList.length > 0) {
-        lines.push(`• **New AFK in 5m** (${setList.length}):`);
+        lines.push(`• **New AFK in window** (${setList.length}):`);
         for (const s of setList.slice(0, 10)) {
           lines.push(`  - <@${s.userId}> [${s.platform}]: "${s.reason}"`);
         }
       }
 
       if (clearedList.length > 0) {
-        lines.push(`• **Returned in 5m** (${clearedList.length}):`);
+        lines.push(`• **Returned in window** (${clearedList.length}):`);
         for (const c of clearedList.slice(0, 10)) {
           const dur = c.durationMs ? formatDuration(c.durationMs) : 'unknown';
           lines.push(`  - <@${c.userId}> returned (was AFK for ${dur})`);
         }
       }
 
+      const embedColor = config.embedColor || BRAND.color;
       const embed = new EmbedBuilder()
-        .setColor(BRAND.color)
-        .setTitle('AFK Activity (5-Minute Summary)')
+        .setColor(embedColor)
+        .setTitle('AFK Activity Summary')
         .setDescription(lines.join('\n'))
         .setTimestamp();
 
       await channel.send({ embeds: [embed] }).catch(() => {});
     } catch (err) {
-      log.error('Error in 5-minute AFK logs dispatch:', err);
+      log.error('Error in AFK logs dispatch:', err);
     }
-  }, 300_000).unref();
+  }, (config.afkSummaryIntervalSec || 300) * 1000).unref();
 
-  // 3. Every 5 minutes (offset by 2.5 minutes / 150_000ms): Account Sync Summary
+  // 3. Account Sync Summary (offset by half the summary interval)
+  const syncIntervalMs = (config.syncSummaryIntervalSec || 300) * 1000;
+  const syncOffsetMs = Math.floor(syncIntervalMs / 2);
+
   setTimeout(() => {
     const runSyncSummary = async () => {
       try {
@@ -163,22 +169,23 @@ export function startPeriodicLogging(client: Client): void {
           lines.push(`  - Discord \`${e.discordId}\` ↔ Fluxer \`${e.fluxerId}\``);
         }
 
+        const embedColor = config.embedColor || BRAND.color;
         const embed = new EmbedBuilder()
-          .setColor(BRAND.color)
-          .setTitle('Account Sync Activity (5-Minute Summary)')
+          .setColor(embedColor)
+          .setTitle('Account Sync Activity Summary')
           .setDescription(lines.join('\n'))
           .setTimestamp();
 
         await channel.send({ embeds: [embed] }).catch(() => {});
       } catch (err) {
-        log.error('Error in 5-minute sync logs dispatch:', err);
+        log.error('Error in sync logs dispatch:', err);
       }
     };
 
-    // Run first time after 2.5 min offset, then repeat every 5 min
+    // Run first time after offset, then repeat every syncIntervalMs
     runSyncSummary();
-    setInterval(runSyncSummary, 300_000).unref();
-  }, 150_000).unref();
+    setInterval(runSyncSummary, syncIntervalMs).unref();
+  }, syncOffsetMs).unref();
 
-  log.info('Periodic loggers initialized (1m system logs, 5m AFK, 5m Sync offset 2.5m)');
+  log.info(`Periodic loggers initialized (Flush: ${config.logFlushIntervalSec}s, AFK: ${config.afkSummaryIntervalSec}s, Sync: ${config.syncSummaryIntervalSec}s)`);
 }

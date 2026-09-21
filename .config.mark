@@ -13,3 +13,26 @@ channels:
   log_channel_id: ""
   afk_log_channel_id: ""
   sync_log_channel_id: ""
+
+timers:
+  log_flush_interval_sec: 60
+  afk_summary_interval_sec: 300
+  sync_summary_interval_sec: 300
+  afk_cleanup_interval_min: 30
+  afk_mention_cooldown_sec: 10
+  sync_code_expiry_sec: 30
+
+cooldowns:
+  same_channel_cooldown_sec: 15
+  cross_channel_cooldown_sec: 5
+
+brand:
+  name: "AnimeX"
+  website_url: "https://animex.one"
+  downloads_url: "https://animex.one/downloads"
+  schedule_url: "https://animex.one/schedule"
+  embed_color: "#000001"
+
+sister_sites:
+  kissasian_url: "https://kissasian.su"
+  nine_anime_url: "https://9animetv.su"

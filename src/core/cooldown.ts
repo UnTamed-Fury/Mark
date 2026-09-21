@@ -2,21 +2,22 @@ import { config } from '../config.js';
 import { SERVER } from '../constants.js';
 import type { CooldownCheckResult } from '../types/index.js';
 
-const SAME_CHANNEL_COOLDOWN_MS = 15_000;
-const CROSS_CHANNEL_COOLDOWN_MS = 5_000;
+const getSameChannelCooldownMs = () => (config.sameChannelCooldownSec || 15) * 1000;
+const getCrossChannelCooldownMs = () => (config.crossChannelCooldownSec || 5) * 1000;
 
 const lastUserExecution = new Map<string, number>();
 const lastUserChannelExecution = new Map<string, number>();
 
 setInterval(() => {
   const now = Date.now();
+  const maxCooldown = Math.max(getSameChannelCooldownMs(), getCrossChannelCooldownMs()) * 2;
   for (const [key, timestamp] of lastUserChannelExecution.entries()) {
-    if (now - timestamp > SAME_CHANNEL_COOLDOWN_MS * 2) {
+    if (now - timestamp > maxCooldown) {
       lastUserChannelExecution.delete(key);
     }
   }
   for (const [userId, timestamp] of lastUserExecution.entries()) {
-    if (now - timestamp > SAME_CHANNEL_COOLDOWN_MS * 2) {
+    if (now - timestamp > maxCooldown) {
       lastUserExecution.delete(userId);
     }
   }
@@ -35,8 +36,8 @@ export function checkCooldown(userId: string, channelId: string): CooldownCheckR
     return { onCooldown: false, cooldownUntilMs: 0 };
   }
 
-  const globalUntil = lastGlobal ? lastGlobal + CROSS_CHANNEL_COOLDOWN_MS : 0;
-  const channelUntil = lastChannel ? lastChannel + SAME_CHANNEL_COOLDOWN_MS : 0;
+  const globalUntil = lastGlobal ? lastGlobal + getCrossChannelCooldownMs() : 0;
+  const channelUntil = lastChannel ? lastChannel + getSameChannelCooldownMs() : 0;
 
   const cooldownUntilMs = Math.max(globalUntil, channelUntil);
 
