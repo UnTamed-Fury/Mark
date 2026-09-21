@@ -14,6 +14,7 @@ function createMockDiscordMessage(content: string, authorId = '123456789'): {
     username: 'TestUser',
     displayName: 'TestUser',
     displayAvatarURL: () => 'https://example.com/avatar.png',
+    send: vi.fn(async () => ({})),
   };
 
   const mockClient: Partial<Client> = {
@@ -21,11 +22,23 @@ function createMockDiscordMessage(content: string, authorId = '123456789'): {
     ws: { ping: 42 } as any,
   };
 
-  const mockMessage: Partial<Message> = {
+  const mockMessage: any = {
     content,
     author: mockUser as User,
     channelId: 'channel-123',
     client: mockClient as Client,
+    delete: vi.fn(async () => mockMessage),
+    channel: {
+      send: vi.fn(async (options: any) => {
+        replies.push(options);
+        return {
+          delete: vi.fn(async () => {}),
+          createMessageComponentCollector: vi.fn(() => ({
+            on: vi.fn(),
+          })),
+        };
+      }),
+    },
     reply: vi.fn(async (options: any) => {
       replies.push(options);
       return mockMessage as Message;

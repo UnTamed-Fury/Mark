@@ -14,6 +14,7 @@ function createMockFluxerMessage(content: string, authorId = '123456789'): {
     username: 'TestUser',
     displayName: 'TestUser',
     displayAvatarURL: () => 'https://example.com/avatar.png',
+    send: vi.fn(async () => ({})),
   };
 
   const mockClient: any = {
@@ -26,6 +27,7 @@ function createMockFluxerMessage(content: string, authorId = '123456789'): {
     author: mockUser,
     channelId: 'channel-123',
     client: mockClient,
+    delete: vi.fn(async () => mockMessage),
     reply: vi.fn(async (options: any) => {
       replies.push(options);
       return mockMessage;

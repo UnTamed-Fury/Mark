@@ -7,6 +7,12 @@ import { handleFluxerReady } from './events/ready.js';
 
 const log = createLogger('FluxerClient');
 
+let activeFluxerClient: Client | null = null;
+
+export function getFluxerClient(): Client | null {
+  return activeFluxerClient;
+}
+
 export async function createFluxerClient(): Promise<Client> {
   let client: Client;
 
@@ -24,6 +30,8 @@ export async function createFluxerClient(): Promise<Client> {
       },
     });
   }
+
+  activeFluxerClient = client;
 
   registerFluxerGatewayEvents(client);
 

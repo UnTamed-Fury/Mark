@@ -19,10 +19,12 @@ import {
   SYNC_COMMAND_META,
 } from '../../core/commandsData.js';
 import { setAfk, getRelativeTimestamp, type AfkScope } from '../../core/afkManager.js';
-import { createSyncCode, claimSyncCode, getLinkedDiscordId } from '../../core/syncManager.js';
+import { createSyncCode, claimSyncCode, getLinkedDiscordId, unlinkUser } from '../../core/syncManager.js';
 import { FAQ_ENTRIES, faqByCategory, isKnownCategory } from '../../core/faqData.js';
 import { createLogger } from '../../core/logger.js';
 import { createFluxerBrandEmbed, sendFluxerEmbed } from './embeds.js';
+import { getDiscordClient } from '../discord/client.js';
+import { EmbedBuilder as DiscordEmbedBuilder } from 'discord.js';
 
 const log = createLogger('FluxerCommands');
 
@@ -271,6 +273,11 @@ const syncCommand: FluxerCommand = {
   aliases: SYNC_COMMAND_META.aliases,
   description: SYNC_COMMAND_META.description,
   async execute(message: Message, args: string[]): Promise<void> {
+    // 1. Immediately delete the user's message so no code/arguments leak in chat
+    if (typeof message.delete === 'function') {
+      message.delete().catch(() => {});
+    }
+
     const codeArg = args[0]?.trim();
 
     if (!codeArg) {
@@ -280,30 +287,84 @@ const syncCommand: FluxerCommand = {
           .setTitle('Account Already Linked')
           .setDescription(
             `Your Fluxer account is currently linked to Discord ID: \`${existing}\`.\n\n` +
-            `To re-link, run \`${config.prefix}sync <code>\` with a code generated from Discord.`
+            `• To re-link, run \`${config.prefix}sync <code>\` with a code generated from Discord.\n` +
+            `• To unlink, run \`${config.prefix}sync unlink\`.`
           );
-        await sendFluxerEmbed(message, embed);
+        const rep = await sendFluxerEmbed(message, embed);
+        setTimeout(() => {
+          if (typeof rep.delete === 'function') rep.delete().catch(() => {});
+        }, 15_000).unref?.();
         return;
       }
 
       const code = createSyncCode(message.author.id, 'fluxer');
-      const tempEmbed = createFluxerBrandEmbed(message)
-        .setTitle('Account Sync Code')
-        .setDescription(
-          `Your one-time link code is:\n\n` +
-          `# \`${code}\`\n\n` +
-          `Go to **Discord** within **30 seconds** and send:\n` +
-          `\`${config.prefix}sync ${code}\`\n\n` +
-          `*(This message will auto-delete in 30 seconds for security).*`
-        );
 
-      const sentMsg = await sendFluxerEmbed(message, tempEmbed);
+      // Attempt sending the code via private DM on Fluxer
+      let dmSent = false;
+      try {
+        const dmEmbed = createFluxerBrandEmbed(message)
+          .setTitle('🔐 Private Account Sync Code')
+          .setDescription(
+            `Your one-time link code is:\n\n` +
+            `# \`${code}\`\n\n` +
+            `Go to **Discord** within **${config.syncCodeExpirySec || 30} seconds** and send:\n` +
+            `\`${config.prefix}sync ${code}\`\n\n` +
+            `*(Valid for ${config.syncCodeExpirySec || 30} seconds. Do not share this code with anyone).*`
+          );
+        await message.author.send({ embeds: [dmEmbed] });
+        dmSent = true;
+      } catch {
+        dmSent = false;
+      }
 
-      setTimeout(() => {
-        if (typeof sentMsg.delete === 'function') {
-          sentMsg.delete().catch(() => {});
-        }
-      }, 30_000);
+      if (dmSent) {
+        const noticeEmbed = createFluxerBrandEmbed(message)
+          .setTitle('Account Sync • One-Time Code')
+          .setDescription(
+            `📩 **A secret link code was sent to your private DMs!**\n\n` +
+            `Go to **Discord** within **${config.syncCodeExpirySec || 30} seconds** to complete linking.\n` +
+            `*(This notice auto-deletes in 15s)*`
+          );
+        const noticeMsg = await sendFluxerEmbed(message, noticeEmbed);
+        setTimeout(() => {
+          if (typeof noticeMsg.delete === 'function') noticeMsg.delete().catch(() => {});
+        }, 15_000).unref?.();
+      } else {
+        const tempEmbed = createFluxerBrandEmbed(message)
+          .setTitle('Account Sync Code')
+          .setDescription(
+            `⚠️ **Could not DM you (DMs may be closed).**\n\n` +
+            `Your one-time link code is:\n\n` +
+            `# \`${code}\`\n\n` +
+            `Go to **Discord** within **${config.syncCodeExpirySec || 30} seconds** and send:\n` +
+            `\`${config.prefix}sync ${code}\`\n\n` +
+            `*(Auto-deleting in ${config.syncCodeExpirySec || 30} seconds for security).*`
+          );
+        const sentMsg = await sendFluxerEmbed(message, tempEmbed);
+        setTimeout(() => {
+          if (typeof sentMsg.delete === 'function') sentMsg.delete().catch(() => {});
+        }, (config.syncCodeExpirySec || 30) * 1000).unref?.();
+      }
+      return;
+    }
+
+    if (codeArg.toLowerCase() === 'unlink') {
+      const existing = getLinkedDiscordId(message.author.id);
+      if (!existing) {
+        const embed = createFluxerBrandEmbed(message)
+          .setTitle('Not Linked')
+          .setDescription('Your Fluxer account is not currently linked to any Discord account.');
+        const rep = await sendFluxerEmbed(message, embed);
+        setTimeout(() => {
+          if (typeof rep.delete === 'function') rep.delete().catch(() => {});
+        }, 10_000).unref?.();
+        return;
+      }
+      unlinkUser(message.author.id, 'fluxer');
+      const embed = createFluxerBrandEmbed(message)
+        .setTitle('Account Unlinked')
+        .setDescription(`Successfully unlinked your Fluxer account from Discord ID \`${existing}\`.`);
+      await sendFluxerEmbed(message, embed);
       return;
     }
 
@@ -312,16 +373,65 @@ const syncCommand: FluxerCommand = {
       const errorEmbed = createFluxerBrandEmbed(message)
         .setTitle('Sync Failed')
         .setDescription(result.message);
-      await sendFluxerEmbed(message, errorEmbed);
+      const rep = await sendFluxerEmbed(message, errorEmbed);
+      setTimeout(() => {
+        if (typeof rep.delete === 'function') rep.delete().catch(() => {});
+      }, 10_000).unref?.();
       return;
+    }
+
+    const user = message.author;
+    const member = message.member;
+    const fluxerDisplayName = member?.nick || user.globalName || user.username;
+    const avatarUrl = typeof user.displayAvatarURL === 'function' ? user.displayAvatarURL() : undefined;
+
+    // Look up Discord user and send connection notification to Discord as well
+    let discordTag = `\`${result.link?.discordId}\``;
+    const discordClient = getDiscordClient();
+    if (discordClient && result.link?.discordId) {
+      try {
+        const discordUser = await discordClient.users.fetch(result.link.discordId);
+        if (discordUser) {
+          discordTag = `${discordUser.tag} (\`${discordUser.id}\`)`;
+
+          // Send connection DM to Discord user!
+          const discordConfirmEmbed = new DiscordEmbedBuilder()
+            .setColor(config.embedColor || BRAND.color)
+            .setTitle('Account Linked Successfully!')
+            .setDescription(
+              `🎉 Your Discord account was just linked with Fluxer!\n\n` +
+              `• **Fluxer User**: ${fluxerDisplayName} (\`@${user.username}\`)\n` +
+              `• **Fluxer ID**: \`${user.id}\`\n` +
+              `• **Discord User**: ${discordUser.tag}\n\n` +
+              `Your **Global AFK** status will now seamlessly synchronize across both Discord and Fluxer.`
+            )
+            .setTimestamp();
+
+          if (avatarUrl) {
+            discordConfirmEmbed.setThumbnail(avatarUrl);
+          }
+
+          await discordUser.send({ embeds: [discordConfirmEmbed] }).catch(() => {});
+        }
+      } catch {
+        // Discord DM is best effort
+      }
     }
 
     const successEmbed = createFluxerBrandEmbed(message)
       .setTitle('Account Linked Successfully!')
       .setDescription(
-        `🎉 Successfully linked your Fluxer account with Discord ID \`${result.link?.discordId}\`!\n\n` +
+        `🎉 Successfully linked your Fluxer account with Discord!\n\n` +
+        `• **Fluxer User**: ${fluxerDisplayName} (\`@${user.username}\`)\n` +
+        `• **Fluxer ID**: \`${user.id}\`\n` +
+        `• **Linked Discord**: ${discordTag}\n\n` +
         `Your **Global AFK** status will now seamlessly synchronize across both platforms.`
       );
+
+    if (avatarUrl) {
+      successEmbed.setThumbnail(avatarUrl);
+    }
+
     await sendFluxerEmbed(message, successEmbed);
   },
 };

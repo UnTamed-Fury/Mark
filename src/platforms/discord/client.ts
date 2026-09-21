@@ -6,6 +6,12 @@ import { handleDiscordReady } from './events/ready.js';
 
 const log = createLogger('DiscordClient');
 
+let activeDiscordClient: Client | null = null;
+
+export function getDiscordClient(): Client | null {
+  return activeDiscordClient;
+}
+
 export function createDiscordClient(): Client {
   const client: Client = new Client({
     intents: [
@@ -36,6 +42,8 @@ export function createDiscordClient(): Client {
       },
     },
   });
+
+  activeDiscordClient = client;
 
   registerDiscordGatewayEvents(client);
 

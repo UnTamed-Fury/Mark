@@ -182,6 +182,25 @@ export function getLinkForUser(userId: string): UserLink | null {
   return discordToLink.get(userId) || fluxerToLink.get(userId) || null;
 }
 
+export function unlinkUser(userId: string, platform: 'discord' | 'fluxer'): boolean {
+  const link = platform === 'discord' ? discordToLink.get(userId) : fluxerToLink.get(userId);
+  if (!link) return false;
+
+  discordToLink.delete(link.discordId);
+  fluxerToLink.delete(link.fluxerId);
+
+  recentSyncEvents.push({
+    discordId: link.discordId,
+    fluxerId: link.fluxerId,
+    timestamp: Date.now(),
+    type: 'unlink',
+  });
+
+  saveSyncStore();
+  log.info(`Unlinked Discord (${link.discordId}) and Fluxer (${link.fluxerId})`);
+  return true;
+}
+
 export function drainRecentSyncEvents(): SyncEvent[] {
   return recentSyncEvents.splice(0, recentSyncEvents.length);
 }
