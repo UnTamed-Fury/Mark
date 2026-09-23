@@ -385,23 +385,27 @@ const syncCommand: DiscordCommand = {
         });
 
         collector.on('collect', async (btnInteraction: ButtonInteraction) => {
-          if (btnInteraction.user.id !== message.author.id) {
+          try {
+            if (btnInteraction.user.id !== message.author.id) {
+              await btnInteraction.reply({
+                content: '❌ This sync code prompt belongs to another user.',
+                ephemeral: true,
+              });
+              return;
+            }
+
             await btnInteraction.reply({
-              content: '❌ This sync code prompt belongs to another user.',
+              content:
+                `🔐 **Your Secret One-Time Sync Code is:**\n\n` +
+                `# \`${code}\`\n\n` +
+                `Switch to **Fluxer** within **${config.syncCodeExpirySec || 30} seconds** and send:\n` +
+                `\`${config.prefix}sync ${code}\`\n\n` +
+                `*(Only you can see this message)*`,
               ephemeral: true,
             });
-            return;
+          } catch {
+            // Best-effort response for already acknowledged or expired interactions
           }
-
-          await btnInteraction.reply({
-            content:
-              `🔐 **Your Secret One-Time Sync Code is:**\n\n` +
-              `# \`${code}\`\n\n` +
-              `Switch to **Fluxer** within **${config.syncCodeExpirySec || 30} seconds** and send:\n` +
-              `\`${config.prefix}sync ${code}\`\n\n` +
-              `*(Only you can see this message)*`,
-            ephemeral: true,
-          });
         });
 
         collector.on('end', () => {

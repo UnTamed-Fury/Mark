@@ -97,8 +97,6 @@ export async function handleDiscordMessageCreate(message: Message): Promise<void
       return;
     }
 
-    const rawArgs = commandBody.split(/\s+/);
-    const commandName = rawArgs[0]?.toLowerCase();
     const args = rawArgs.slice(1);
 
     if (!commandName) return;

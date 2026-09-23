@@ -1,3 +1,8 @@
+# AnimeX Bot - Configuration Template
+# Non-sensitive bot and server configuration settings.
+# For sensitive credentials (bot tokens), use .env instead.
+# For local developer overrides, copy to .config.mark.local
+
 owner_id: "1344082654852550788"
 
 servers:

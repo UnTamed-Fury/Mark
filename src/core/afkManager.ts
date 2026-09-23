@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { config } from '../config.js';
 import { createLogger } from './logger.js';
 import { getLinkedDiscordId, getLinkedFluxerId } from './syncManager.js';
 
@@ -25,8 +26,6 @@ export interface AfkActivityEvent {
   readonly timestamp: number;
   readonly durationMs?: number;
 }
-
-import { config } from '../config.js';
 
 function resolveDataDir(): string {
   if (process.env.DATA_DIR && fs.existsSync(process.env.DATA_DIR)) {

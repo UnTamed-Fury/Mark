@@ -18,7 +18,7 @@ export interface StaticCommandContent {
 
 export const WEBSITE_COMMAND_DATA: StaticCommandContent = {
   name: 'website',
-  aliases: ['site', 'url', 'link', 'domain', 'web', 'address'],
+  aliases: ['site', 'url', 'domain', 'web', 'address'],
   description: 'Shows the official AnimeX website link and direct portals.',
   title: 'AnimeX • Official Website',
   body: 'Stream your favorite anime in high definition on **AnimeX**.',

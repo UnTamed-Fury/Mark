@@ -238,7 +238,7 @@ const afkCommand: FluxerCommand = {
       });
 
       const collected = reactions.first();
-      const emojiName = collected?.reaction.emoji.name;
+      const emojiName = collected?.reaction?.emoji?.name ?? collected?.reaction?.emojiIdentifier;
 
       if (!emojiName || emojiName === '❌') {
         const cancelEmbed = createFluxerBrandEmbed(message)

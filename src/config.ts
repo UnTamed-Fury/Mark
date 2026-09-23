@@ -107,6 +107,7 @@ function parseConfig(): AppConfig {
 
   const envConfig = loadEnvFile('.env');
   const baseYaml = loadYamlFile('.config.mark');
+  const exampleYaml = loadYamlFile('.config.mark.example');
 
   // Helper to extract value with cascading precedence
   const getVal = (
@@ -152,13 +153,16 @@ function parseConfig(): AppConfig {
       return sysVal.trim();
     }
 
-    // 5. Check base repository files (.env & .config.mark)
+    // 5. Check base repository files (.env & .config.mark / .config.mark.example)
     const envVal = envConfig[envKey];
     if (envVal !== undefined && envVal.trim().length > 0) {
       return envVal.trim();
     }
     const fromBaseYaml = checkYamlObj(baseYaml);
     if (fromBaseYaml) return fromBaseYaml;
+
+    const fromExampleYaml = checkYamlObj(exampleYaml);
+    if (fromExampleYaml) return fromExampleYaml;
 
     return null;
   };

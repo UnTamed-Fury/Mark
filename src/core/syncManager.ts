@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { config } from '../config.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('SyncManager');
@@ -24,8 +25,6 @@ interface PendingSyncCode {
   readonly createdAt: number;
   readonly expiresAt: number;
 }
-
-import { config } from '../config.js';
 
 function resolveDataDir(): string {
   if (process.env.DATA_DIR && fs.existsSync(process.env.DATA_DIR)) {
