@@ -30,7 +30,5 @@ COPY --from=builder --chown=node:node /app/.env.example ./
 
 USER node
 
-VOLUME ["/data"]
-
 # Direct node execution ensures clean SIGINT/SIGTERM signal propagation
 CMD ["node", "--max-old-space-size=256", "dist/index.js"]
