@@ -68,7 +68,7 @@ export function saveSyncStore(): void {
     }
     const filePath = getSyncFilePath();
     const list = Array.from(discordToLink.values());
-    const tempFile = `${filePath}.tmp`;
+    const tempFile = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
     fs.writeFileSync(tempFile, JSON.stringify(list, null, 2), 'utf-8');
     fs.renameSync(tempFile, filePath);
   } catch (error) {
