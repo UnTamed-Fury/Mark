@@ -20,6 +20,12 @@ export function createBrandEmbed(message?: Message): EmbedBuilder {
 export async function sendEmbed(message: Message, embed: EmbedBuilder): Promise<Message> {
   return message.reply({
     embeds: [embed],
-    allowedMentions: { repliedUser: false },
+    allowedMentions: {
+      repliedUser: false,
+      parse: [],
+      users: [],
+      roles: [],
+    },
   });
 }
+

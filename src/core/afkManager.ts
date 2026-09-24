@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { createLogger } from './logger.js';
+import { getDataDir, getAfkFilePath } from './dataDir.js';
 import { getLinkedDiscordId, getLinkedFluxerId } from './syncManager.js';
 
 const log = createLogger('AfkManager');
@@ -27,19 +28,6 @@ export interface AfkActivityEvent {
   readonly durationMs?: number;
 }
 
-function resolveDataDir(): string {
-  if (process.env.DATA_DIR && fs.existsSync(process.env.DATA_DIR)) {
-    return process.env.DATA_DIR;
-  }
-  if (fs.existsSync('/data')) {
-    return '/data';
-  }
-  return path.resolve(process.cwd(), 'data');
-}
-
-const DATA_DIR = resolveDataDir();
-const AFK_FILE = path.join(DATA_DIR, 'afk.json');
-
 // Memory cache:
 // Global entries: key = `global:${userId}`
 // Server entries: key = `server:${platform}:${guildId}:${userId}`
@@ -54,8 +42,9 @@ const recentAfkEvents: AfkActivityEvent[] = [];
 
 export function loadAfkStore(): void {
   try {
-    if (fs.existsSync(AFK_FILE)) {
-      const data = fs.readFileSync(AFK_FILE, 'utf-8');
+    const filePath = getAfkFilePath();
+    if (fs.existsSync(filePath)) {
+      const data = fs.readFileSync(filePath, 'utf-8');
       const parsed: AfkUserEntry[] = JSON.parse(data);
       afkStore.clear();
       for (const entry of parsed) {
@@ -71,11 +60,15 @@ export function loadAfkStore(): void {
 
 export function saveAfkStore(): void {
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    const dataDir = getDataDir();
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
     }
+    const filePath = getAfkFilePath();
     const list = Array.from(afkStore.values());
-    fs.writeFileSync(AFK_FILE, JSON.stringify(list, null, 2), 'utf-8');
+    const tempFile = `${filePath}.tmp`;
+    fs.writeFileSync(tempFile, JSON.stringify(list, null, 2), 'utf-8');
+    fs.renameSync(tempFile, filePath);
   } catch (error) {
     log.error('Failed to save AFK store to disk:', error);
   }
@@ -260,7 +253,11 @@ export function formatDuration(durationMs: number): string {
   return `${days}d ${remHours}h`;
 }
 
-export function getRelativeTimestamp(timestampMs: number): string {
+export function getRelativeTimestamp(timestampMs: number, platform: 'discord' | 'fluxer' = 'discord'): string {
+  if (platform === 'fluxer') {
+    const elapsed = Math.max(0, Date.now() - timestampMs);
+    return `${formatDuration(elapsed)} ago`;
+  }
   return `<t:${Math.floor(timestampMs / 1000)}:R>`;
 }
 
@@ -285,8 +282,9 @@ export function clearAllAfk(): void {
   afkNotifyCooldowns.clear();
   recentAfkEvents.length = 0;
   try {
-    if (fs.existsSync(AFK_FILE)) {
-      fs.unlinkSync(AFK_FILE);
+    const filePath = getAfkFilePath();
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
     }
   } catch {
     // Ignore unlink error

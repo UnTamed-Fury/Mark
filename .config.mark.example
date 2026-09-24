@@ -1,43 +1,98 @@
-# AnimeX Bot - Configuration Template
-# Non-sensitive bot and server configuration settings.
-# For sensitive credentials (bot tokens), use .env instead.
-# For local developer overrides, copy to .config.mark.local
+# AnimeX Bot Configuration
+# Non-sensitive bot settings, channel mappings, intervals, and cloud recovery.
+#
+# Environment vs Config files:
+# - Sensitive secrets (bot tokens) should be placed in .env
+# - Local developer overrides should be placed in .config.mark.local
+# - When deployed with a persistent volume, this file lives in /data/.config.mark
 
+# Bot Owner: The primary developer / administrator user ID.
 owner_id: "1344082654852550788"
 
+# Server (Guild) IDs
+# Define where the bot operates across supported platforms.
 servers:
+  # Primary AnimeX Discord server
   discord_server_id: "1320161905267970079"
+  # Primary AnimeX Fluxer server
   fluxer_server_id: "1475654458820477346"
+  # Optional developer test server ID for testing commands in isolation
   test_server_id: ""
+  # Dedicated logging server (if separate from main community servers)
   log_server_id: ""
+  # Custom Fluxer instance API URL (leave empty to use default discovery)
   fluxer_api_url: ""
 
+# Channel IDs
+# Target text channels where automated messages, embeds, and logs are sent.
 channels:
+  # Channel displaying community rules (referenced in +rules embed)
   rules_channel_id: "1320161905402318853"
+  # Support ticket channel (referenced in +ticket embed)
   ticket_channel_id: "1320161905695789095"
+  # Main system log channel for streaming error and warning logs
   log_channel_id: ""
+  # Dedicated channel for 5-minute AFK activity summaries (falls back to log_channel_id if empty)
   afk_log_channel_id: ""
+  # Dedicated channel for account sync summaries (falls back to log_channel_id if empty)
   sync_log_channel_id: ""
 
+# Timers and Intervals
+# Configures how often background workers, flushes, and expiration tasks execute.
 timers:
+  # Interval in seconds between streaming buffered system logs to the log channel (default: 60)
   log_flush_interval_sec: 60
+  # Interval in seconds between AFK batch summary posts (default: 300 = 5 minutes)
   afk_summary_interval_sec: 300
+  # Interval in seconds between account sync summary posts (default: 300 = 5 minutes)
   sync_summary_interval_sec: 300
+  # Interval in minutes for purging expired temporary records from memory (default: 30)
   afk_cleanup_interval_min: 30
+  # Cooldown in seconds before re-notifying chat when an AFK user is mentioned again (default: 10)
   afk_mention_cooldown_sec: 10
+  # Lifetime in seconds for one-time account linking verification codes (default: 30)
   sync_code_expiry_sec: 30
 
+# Anti-Spam Command Cooldowns
+# Protects chat and bot resources from rapid command spam.
 cooldowns:
+  # Minimum seconds a user must wait before invoking another command in the same channel (default: 15)
   same_channel_cooldown_sec: 15
+  # Minimum seconds a user must wait before invoking a command in another channel (default: 5)
   cross_channel_cooldown_sec: 5
 
+# Branding and Portal Links
+# Information displayed in embeds, help listings, and site redirect commands.
 brand:
   name: "AnimeX"
   website_url: "https://animex.one"
   downloads_url: "https://animex.one/downloads"
   schedule_url: "https://animex.one/schedule"
+  # Hex color code for embeds (e.g. #000001)
   embed_color: "#000001"
 
+# Sister Site Links
+# Affiliate and sister streaming platforms linked in commands (+kissasian, +9anime).
 sister_sites:
   kissasian_url: "https://kissasian.su"
   nine_anime_url: "https://9animetv.su"
+
+# Cloud Backup & Disaster Recovery
+# Automatically archives persistent data (afk.json, sync.json, .config.mark)
+# to a private Discord or Fluxer channel.
+# If files exceed the max part size, they are automatically chunked into numbered parts and reassembled on restore.
+cloud_backup:
+  # Set to true to activate automated cloud backups and disaster recovery
+  enabled: false
+  # Platform hosting the backup channel ("discord" or "fluxer")
+  platform: "discord"
+  # Server (Guild) ID where the backup channel is located
+  server_id: ""
+  # Private text channel ID designated exclusively for backup file uploads
+  channel_id: ""
+  # Interval in minutes between periodic cloud backups (default: 60)
+  backup_interval_min: 60
+  # Automatically pull and restore the latest snapshot on bot boot (default: true)
+  auto_restore_on_boot: true
+  # Maximum file part size in MB before chunking (Discord free tier limit is 8MB-10MB, default: 8)
+  max_part_size_mb: 8

@@ -1,13 +1,16 @@
 import type { Message } from 'discord.js';
 import { config } from '../../../config.js';
 import {
-  clearAfk,
   getAfk,
   canNotifyAfk,
   recordAfkNotification,
-  formatDuration,
   getRelativeTimestamp,
 } from '../../../core/afkManager.js';
+import {
+  parseMessageCommand,
+  handleAfkMessageReturn,
+  isAfkCommandName,
+} from '../../../core/messagePipeline.js';
 import { isWebsiteQuery } from '../../../core/autoResponder.js';
 import { checkCooldown, recordCommandExecution } from '../../../core/cooldown.js';
 import { createLogger } from '../../../core/logger.js';
@@ -24,37 +27,25 @@ export async function handleDiscordMessageCreate(message: Message): Promise<void
 
   const content = message.content ?? '';
   const botId = message.client.user?.id;
-  const mentionPrefix = botId ? `<@${botId}>` : null;
-  const nickMentionPrefix = botId ? `<@!${botId}>` : null;
-
-  let commandBody: string | null = null;
-
-  if (content.startsWith(config.prefix)) {
-    commandBody = content.slice(config.prefix.length).trim();
-  } else if (mentionPrefix && content.startsWith(mentionPrefix)) {
-    commandBody = content.slice(mentionPrefix.length).trim();
-  } else if (nickMentionPrefix && content.startsWith(nickMentionPrefix)) {
-    commandBody = content.slice(nickMentionPrefix.length).trim();
-  }
-
-  const rawArgs = commandBody !== null ? commandBody.split(/\s+/) : [];
-  const commandName = rawArgs[0]?.toLowerCase();
-  const isAfkCommand = commandName === 'afk' || commandName === 'brb' || commandName === 'away';
+  const botMentions = botId ? [`<@${botId}>`, `<@!${botId}>`] : [];
+  const parsed = parseMessageCommand(content, config.prefix, botMentions);
 
   // 1. If author was AFK, remove their AFK status (unless they are executing +afk)
-  if (!isAfkCommand) {
-    const cleared = clearAfk(message.author.id, 'discord', message.guildId);
-    if (cleared) {
-      const duration = formatDuration(Date.now() - cleared.timestamp);
-      const embed = createBrandEmbed(message)
-        .setTitle('Welcome Back!')
-        .setDescription(
-          `Welcome back <@${message.author.id}>, I removed your AFK status.\n\n` +
-          `• **AFK Duration**: ${duration}\n` +
-          `• **Reason**: ${cleared.reason}`
-        );
-      await sendEmbed(message, embed).catch(() => {});
-    }
+  const afkReturn = handleAfkMessageReturn(
+    message.author.id,
+    'discord',
+    message.guildId,
+    parsed ? isAfkCommandName(parsed.commandName) : false
+  );
+  if (afkReturn.cleared && afkReturn.entry) {
+    const embed = createBrandEmbed(message)
+      .setTitle('Welcome Back!')
+      .setDescription(
+        `Welcome back <@${message.author.id}>, I removed your AFK status.\n\n` +
+        `• **AFK Duration**: ${afkReturn.durationText}\n` +
+        `• **Reason**: ${afkReturn.entry.reason}`
+      );
+    await sendEmbed(message, embed).catch(() => {});
   }
 
   // 2. Notify if any mentioned or replied-to users are AFK
@@ -88,8 +79,8 @@ export async function handleDiscordMessageCreate(message: Message): Promise<void
 
 
   // Handle prefix & mention commands
-  if (commandBody !== null) {
-    if (commandBody.length === 0) {
+  if (parsed !== null) {
+    if (parsed.commandBody.length === 0) {
       const embed = createBrandEmbed(message)
         .setTitle('AnimeX Bot')
         .setDescription(`Hello <@${message.author.id}>! Type \`${config.prefix}help\` to view all commands.`);
@@ -97,11 +88,9 @@ export async function handleDiscordMessageCreate(message: Message): Promise<void
       return;
     }
 
-    const args = rawArgs.slice(1);
+    if (!parsed.commandName) return;
 
-    if (!commandName) return;
-
-    const command = getDiscordCommand(commandName);
+    const command = getDiscordCommand(parsed.commandName);
     if (!command) return;
 
     // Cooldown check
@@ -116,7 +105,7 @@ export async function handleDiscordMessageCreate(message: Message): Promise<void
 
     try {
       log.info(`Executing command "${command.name}" for ${message.author.tag} (${message.author.id})`);
-      await command.execute(message, args);
+      await command.execute(message, parsed.args);
     } catch (error) {
       log.error(`Error executing command "${command.name}":`, error);
       const embed = createBrandEmbed(message)

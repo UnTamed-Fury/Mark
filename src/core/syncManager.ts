@@ -1,7 +1,8 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
-import path from 'node:path';
 import { config } from '../config.js';
 import { createLogger } from './logger.js';
+import { getDataDir, getSyncFilePath } from './dataDir.js';
 
 const log = createLogger('SyncManager');
 
@@ -26,18 +27,6 @@ interface PendingSyncCode {
   readonly expiresAt: number;
 }
 
-function resolveDataDir(): string {
-  if (process.env.DATA_DIR && fs.existsSync(process.env.DATA_DIR)) {
-    return process.env.DATA_DIR;
-  }
-  if (fs.existsSync('/data')) {
-    return '/data';
-  }
-  return path.resolve(process.cwd(), 'data');
-}
-
-const DATA_DIR = resolveDataDir();
-const SYNC_FILE = path.join(DATA_DIR, 'sync.json');
 const CODE_LIFETIME_MS = (config.syncCodeExpirySec || 30) * 1000; // Configurable (default 30s)
 
 // Maps:
@@ -54,8 +43,9 @@ const recentSyncEvents: SyncEvent[] = [];
 
 export function loadSyncStore(): void {
   try {
-    if (fs.existsSync(SYNC_FILE)) {
-      const data = fs.readFileSync(SYNC_FILE, 'utf-8');
+    const filePath = getSyncFilePath();
+    if (fs.existsSync(filePath)) {
+      const data = fs.readFileSync(filePath, 'utf-8');
       const parsed: UserLink[] = JSON.parse(data);
       discordToLink.clear();
       fluxerToLink.clear();
@@ -72,26 +62,42 @@ export function loadSyncStore(): void {
 
 export function saveSyncStore(): void {
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    const dataDir = getDataDir();
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
     }
+    const filePath = getSyncFilePath();
     const list = Array.from(discordToLink.values());
-    fs.writeFileSync(SYNC_FILE, JSON.stringify(list, null, 2), 'utf-8');
+    const tempFile = `${filePath}.tmp`;
+    fs.writeFileSync(tempFile, JSON.stringify(list, null, 2), 'utf-8');
+    fs.renameSync(tempFile, filePath);
   } catch (error) {
     log.error('Failed to save sync store to disk:', error);
   }
 }
 
+export function pruneExpiredSyncCodes(): void {
+  const now = Date.now();
+  for (const [code, pending] of pendingCodes.entries()) {
+    if (now > pending.expiresAt) {
+      pendingCodes.delete(code);
+    }
+  }
+}
+
 export function createSyncCode(userId: string, platform: 'discord' | 'fluxer'): string {
-  // Prune any existing pending code for this user
+  // Prune any expired pending codes
+  pruneExpiredSyncCodes();
+
+  // Prune any existing pending code for this specific user
   for (const [code, pending] of pendingCodes.entries()) {
     if (pending.sourceUserId === userId && pending.sourcePlatform === platform) {
       pendingCodes.delete(code);
     }
   }
 
-  // Generate 6-digit numeric code
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  // Generate cryptographically secure 6-digit numeric code
+  const code = crypto.randomInt(100000, 1000000).toString();
   const now = Date.now();
 
   pendingCodes.set(code, {
@@ -214,8 +220,9 @@ export function clearAllSync(): void {
   pendingCodes.clear();
   recentSyncEvents.length = 0;
   try {
-    if (fs.existsSync(SYNC_FILE)) {
-      fs.unlinkSync(SYNC_FILE);
+    const filePath = getSyncFilePath();
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
     }
   } catch {
     // Ignore error
@@ -226,11 +233,5 @@ export function clearAllSync(): void {
 loadSyncStore();
 
 // Code cleanup interval
-setInterval(() => {
-  const now = Date.now();
-  for (const [code, pending] of pendingCodes.entries()) {
-    if (now > pending.expiresAt) {
-      pendingCodes.delete(code);
-    }
-  }
-}, 10_000).unref();
+setInterval(pruneExpiredSyncCodes, 10_000).unref();
+

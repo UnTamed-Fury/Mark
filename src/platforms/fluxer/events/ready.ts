@@ -2,6 +2,7 @@ import type { Client } from '@fluxerjs/core';
 import { config } from '../../../config.js';
 import { createLogger } from '../../../core/logger.js';
 import { startPeriodicLogging } from '../../../core/periodicLogger.js';
+import { initCloudBackup } from '../../../core/cloudBackup.js';
 
 const log = createLogger('FluxerReady');
 
@@ -12,4 +13,6 @@ export function handleFluxerReady(client: Client): void {
   log.info(`Fluxer bot online as ${username} (${client.user?.id}) | Guilds: ${client.guilds.size} [${guildList}] | Prefix: ${config.prefix}`);
 
   startPeriodicLogging();
+  void initCloudBackup();
 }
+

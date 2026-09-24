@@ -28,4 +28,13 @@ describe('Config Module', () => {
     expect(config.nineAnimeUrl).toContain('9anime');
     expect(typeof config.embedColor).toBe('number');
   });
+
+  it('provides cloud backup and disaster recovery settings', () => {
+    expect(typeof config.cloudBackupEnabled).toBe('boolean');
+    expect(['discord', 'fluxer']).toContain(config.cloudBackupPlatform);
+    expect(config.cloudBackupIntervalMin).toBeGreaterThanOrEqual(1);
+    expect(typeof config.cloudBackupAutoRestore).toBe('boolean');
+    expect(config.cloudBackupMaxPartSizeMb).toBeGreaterThanOrEqual(1);
+  });
 });
+

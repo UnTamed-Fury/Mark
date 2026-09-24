@@ -25,6 +25,9 @@ export function createFluxerBrandEmbed(message?: Message): EmbedBuilder {
 export async function sendFluxerEmbed(message: Message, embed: EmbedBuilder): Promise<Message> {
   return message.reply({
     embeds: [embed],
-    allowedMentions: { repliedUser: false },
+    allowedMentions: {
+      repliedUser: false,
+      parse: [],
+    },
   });
 }

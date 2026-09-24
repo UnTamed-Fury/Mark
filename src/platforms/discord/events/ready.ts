@@ -2,6 +2,7 @@ import { ActivityType, type Client } from 'discord.js';
 import { config } from '../../../config.js';
 import { createLogger } from '../../../core/logger.js';
 import { startPeriodicLogging } from '../../../core/periodicLogger.js';
+import { initCloudBackup } from '../../../core/cloudBackup.js';
 
 const log = createLogger('DiscordReady');
 
@@ -22,5 +23,6 @@ export function handleDiscordReady(client: Client): void {
   });
 
   startPeriodicLogging(client);
+  void initCloudBackup();
 }
 

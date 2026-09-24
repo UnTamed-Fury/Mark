@@ -101,6 +101,39 @@ export function createEmbedBatches(
   return batches;
 }
 
+function toDiscordEmbed(p: EmbedPayload): DiscordEmbedBuilder {
+  const eb = new DiscordEmbedBuilder()
+    .setTitle(p.title)
+    .setDescription(p.description)
+    .setColor(p.color);
+  if (p.timestamp) eb.setTimestamp(p.timestamp);
+  return eb;
+}
+
+function toFluxerEmbed(p: EmbedPayload): FluxerEmbedBuilder {
+  const eb = new FluxerEmbedBuilder()
+    .setTitle(p.title)
+    .setDescription(p.description)
+    .setColor(p.color);
+  if (p.timestamp) eb.setTimestamp(p.timestamp);
+  return eb;
+}
+
+async function sendBatchedEmbeds<T>(
+  channel: { send: (opts: { embeds: T[] }) => Promise<unknown> },
+  payloads: EmbedPayload[],
+  renderEmbed: (p: EmbedPayload) => T,
+): Promise<void> {
+  const batches = createEmbedBatches(payloads);
+  for (let i = 0; i < batches.length; i++) {
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const embeds = batches[i]!.map(renderEmbed);
+    await channel.send({ embeds });
+  }
+}
+
 async function resolveLogTarget(
   channelId: string | null,
   channelRoleName: string
@@ -117,25 +150,8 @@ async function resolveLogTarget(
         return {
           platform: 'discord',
           channelId,
-          sendBatches: async (payloads: EmbedPayload[]) => {
-            const batches = createEmbedBatches(payloads);
-            for (let i = 0; i < batches.length; i++) {
-              if (i > 0) {
-                await new Promise((resolve) => setTimeout(resolve, 500));
-              }
-              const embeds = batches[i]!.map((p) => {
-                const eb = new DiscordEmbedBuilder()
-                  .setTitle(p.title)
-                  .setDescription(p.description)
-                  .setColor(p.color);
-                if (p.timestamp) eb.setTimestamp(p.timestamp);
-                return eb;
-              });
-              await (channel as unknown as { send: (opts: { embeds: DiscordEmbedBuilder[] }) => Promise<unknown> }).send({
-                embeds,
-              });
-            }
-          },
+          sendBatches: (payloads: EmbedPayload[]) =>
+            sendBatchedEmbeds(channel as any, payloads, toDiscordEmbed),
         };
       }
     } catch {
@@ -153,25 +169,8 @@ async function resolveLogTarget(
         return {
           platform: 'fluxer',
           channelId,
-          sendBatches: async (payloads: EmbedPayload[]) => {
-            const batches = createEmbedBatches(payloads);
-            for (let i = 0; i < batches.length; i++) {
-              if (i > 0) {
-                await new Promise((resolve) => setTimeout(resolve, 500));
-              }
-              const embeds = batches[i]!.map((p) => {
-                const eb = new FluxerEmbedBuilder()
-                  .setTitle(p.title)
-                  .setDescription(p.description)
-                  .setColor(p.color);
-                if (p.timestamp) eb.setTimestamp(p.timestamp);
-                return eb;
-              });
-              await (channel as unknown as { send: (opts: { embeds: FluxerEmbedBuilder[] }) => Promise<unknown> }).send({
-                embeds,
-              });
-            }
-          },
+          sendBatches: (payloads: EmbedPayload[]) =>
+            sendBatchedEmbeds(channel as any, payloads, toFluxerEmbed),
         };
       }
     } catch {
@@ -191,6 +190,58 @@ async function resolveLogTarget(
   return null;
 }
 
+export async function flushSystemLogs(): Promise<void> {
+  const targetLogChannelId = config.logChannelId;
+  try {
+    const rawLogs = getLogsAfterId(lastFlushedLogId);
+    if (rawLogs.length === 0) return;
+
+    lastFlushedLogId = rawLogs[rawLogs.length - 1]!.id;
+
+    // Exclude PeriodicLogger logs to avoid feedback loops
+    const recentLogs = rawLogs.filter((l) => l.context !== 'PeriodicLogger');
+    if (recentLogs.length === 0) return;
+
+    const target = await resolveLogTarget(targetLogChannelId, 'log_channel_id');
+    if (!target) return;
+
+    const hasError = recentLogs.some((l) => l.level === 'error');
+    const hasWarn = recentLogs.some((l) => l.level === 'warn');
+    const embedColor = hasError
+      ? COLOR_ERROR
+      : hasWarn
+        ? COLOR_WARN
+        : (config.embedColor || BRAND.color);
+
+    const logText = recentLogs
+      .map((l) => {
+        const time = new Date(l.timestamp).toISOString().split('T')[1]?.slice(0, 8);
+        return `[${time}] [${l.level.toUpperCase()}] [${l.context}] ${l.message}`;
+      })
+      .join('\n');
+
+    const chunks = splitIntoChunks(logText, 1800);
+    const embedPayloads: EmbedPayload[] = chunks.map((chunk, i) => ({
+      title: chunks.length > 1 ? `System Logs (${i + 1}/${chunks.length})` : 'System Logs (Batch)',
+      description: `\`\`\`prolog\n${chunk}\n\`\`\``,
+      color: embedColor,
+      timestamp: new Date(),
+    }));
+
+    try {
+      await target.sendBatches(embedPayloads);
+    } catch (err) {
+      log.error(`Failed to dispatch system logs to ${target.platform} channel ${target.channelId}:`, err);
+    }
+  } catch (err) {
+    log.error('Error in system logs dispatch loop:', err);
+  }
+}
+
+export async function flushLogsImmediately(): Promise<void> {
+  await flushSystemLogs();
+}
+
 export function startPeriodicLogging(client?: DiscordClient): void {
   if (client) {
     discordClientInstance = client;
@@ -205,50 +256,7 @@ export function startPeriodicLogging(client?: DiscordClient): void {
 
   // 1. Every 1 minute: Flush recent system & runtime logs
   setInterval(async () => {
-    try {
-      const rawLogs = getLogsAfterId(lastFlushedLogId);
-      if (rawLogs.length === 0) return;
-
-      lastFlushedLogId = rawLogs[rawLogs.length - 1]!.id;
-
-      // Exclude PeriodicLogger logs to avoid feedback loops
-      const recentLogs = rawLogs.filter((l) => l.context !== 'PeriodicLogger');
-      if (recentLogs.length === 0) return;
-
-      const target = await resolveLogTarget(targetLogChannelId, 'log_channel_id');
-      if (!target) return;
-
-      const hasError = recentLogs.some((l) => l.level === 'error');
-      const hasWarn = recentLogs.some((l) => l.level === 'warn');
-      const embedColor = hasError
-        ? COLOR_ERROR
-        : hasWarn
-          ? COLOR_WARN
-          : (config.embedColor || BRAND.color);
-
-      const logText = recentLogs
-        .map((l) => {
-          const time = new Date(l.timestamp).toISOString().split('T')[1]?.slice(0, 8);
-          return `[${time}] [${l.level.toUpperCase()}] [${l.context}] ${l.message}`;
-        })
-        .join('\n');
-
-      const chunks = splitIntoChunks(logText, 1800);
-      const embedPayloads: EmbedPayload[] = chunks.map((chunk, i) => ({
-        title: chunks.length > 1 ? `System Logs (${i + 1}/${chunks.length})` : 'System Logs (Batch)',
-        description: `\`\`\`prolog\n${chunk}\n\`\`\``,
-        color: embedColor,
-        timestamp: new Date(),
-      }));
-
-      try {
-        await target.sendBatches(embedPayloads);
-      } catch (err) {
-        log.error(`Failed to dispatch system logs to ${target.platform} channel ${target.channelId}:`, err);
-      }
-    } catch (err) {
-      log.error('Error in system logs dispatch loop:', err);
-    }
+    await flushSystemLogs();
   }, (config.logFlushIntervalSec || 60) * 1000).unref();
 
   // 2. AFK Activity Summary
