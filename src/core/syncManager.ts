@@ -41,6 +41,25 @@ const pendingCodes = new Map<string, PendingSyncCode>();
 // Recent sync events (for 5-min batch logs)
 const recentSyncEvents: SyncEvent[] = [];
 
+export type SyncEventListener = (event: SyncEvent) => void;
+const syncEventListeners = new Set<SyncEventListener>();
+
+export function onSyncEvent(listener: SyncEventListener): () => void {
+  syncEventListeners.add(listener);
+  return () => syncEventListeners.delete(listener);
+}
+
+function emitSyncEvent(event: SyncEvent): void {
+  recentSyncEvents.push(event);
+  for (const listener of syncEventListeners) {
+    try {
+      listener(event);
+    } catch (err) {
+      log.error('Error in sync event listener:', err);
+    }
+  }
+}
+
 export function loadSyncStore(): void {
   try {
     const filePath = getSyncFilePath();
@@ -158,7 +177,7 @@ export function claimSyncCode(
   fluxerToLink.set(fluxerId, link);
   pendingCodes.delete(cleanCode);
 
-  recentSyncEvents.push({
+  emitSyncEvent({
     discordId,
     fluxerId,
     timestamp: Date.now(),
@@ -194,7 +213,7 @@ export function unlinkUser(userId: string, platform: 'discord' | 'fluxer'): bool
   discordToLink.delete(link.discordId);
   fluxerToLink.delete(link.fluxerId);
 
-  recentSyncEvents.push({
+  emitSyncEvent({
     discordId: link.discordId,
     fluxerId: link.fluxerId,
     timestamp: Date.now(),

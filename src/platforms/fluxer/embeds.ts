@@ -23,11 +23,21 @@ export function createFluxerBrandEmbed(message?: Message): EmbedBuilder {
 }
 
 export async function sendFluxerEmbed(message: Message, embed: EmbedBuilder): Promise<Message> {
-  return message.reply({
+  const options = {
     embeds: [embed],
     allowedMentions: {
       repliedUser: false,
       parse: [],
     },
-  });
+  };
+
+  if (message.channel && typeof message.channel.send === 'function') {
+    try {
+      return await message.channel.send(options);
+    } catch {
+      // Fallback to reply if channel.send fails
+    }
+  }
+
+  return message.reply(options);
 }

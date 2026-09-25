@@ -6,6 +6,7 @@ import {
   ButtonStyle,
   ComponentType,
   type ButtonInteraction,
+  MessageFlags,
 } from 'discord.js';
 import { config } from '../../config.js';
 import { BRAND } from '../../constants.js';
@@ -127,7 +128,7 @@ const afkCommand: DiscordCommand = {
       const interaction = await promptMsg.awaitMessageComponent({
         filter: (i: ButtonInteraction) => {
           if (i.user.id !== message.author.id) {
-            i.reply({ content: 'This AFK prompt is not for you.', ephemeral: true }).catch(() => {});
+            i.reply({ content: 'This AFK prompt is not for you.', flags: MessageFlags.Ephemeral }).catch(() => {});
             return false;
           }
           return i.customId.startsWith('afk_');
@@ -136,11 +137,18 @@ const afkCommand: DiscordCommand = {
         time: 60_000,
       });
 
+      // Immediately acknowledge interaction within 3s window to prevent interaction failure
+      await interaction.deferUpdate().catch(() => {});
+
       if (interaction.customId.startsWith('afk_cancel_')) {
         const cancelEmbed = createBrandEmbed(message)
           .setTitle('AFK Cancelled')
           .setDescription('AFK setup was cancelled.');
-        await interaction.update({ embeds: [cancelEmbed], components: [] });
+        try {
+          await interaction.editReply({ embeds: [cancelEmbed], components: [] });
+        } catch {
+          await promptMsg.edit({ embeds: [cancelEmbed], components: [] }).catch(() => {});
+        }
         return;
       }
 
@@ -157,8 +165,13 @@ const afkCommand: DiscordCommand = {
           `• **Started**: ${relativeTime}`
         );
 
-      await interaction.update({ embeds: [successEmbed], components: [] });
-    } catch {
+      try {
+        await interaction.editReply({ embeds: [successEmbed], components: [] });
+      } catch {
+        await promptMsg.edit({ embeds: [successEmbed], components: [] }).catch(() => {});
+      }
+    } catch (err) {
+      log.debug('AFK interaction collector ended:', err);
       // Timeout after 60s
       await promptMsg.edit({ components: [] }).catch(() => {});
     }
@@ -256,7 +269,7 @@ const syncCommand: DiscordCommand = {
             if (btnInteraction.user.id !== message.author.id) {
               await btnInteraction.reply({
                 content: 'This sync code prompt belongs to another user.',
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
               });
               return;
             }
@@ -268,7 +281,7 @@ const syncCommand: DiscordCommand = {
                 `Switch to **Fluxer** within **${config.syncCodeExpirySec || 30} seconds** and send:\n` +
                 `\`${config.prefix}sync ${code}\`\n\n` +
                 `*(Only you can see this message)*`,
-              ephemeral: true,
+              flags: MessageFlags.Ephemeral,
             });
           } catch {
             // Best-effort response for already acknowledged or expired interactions

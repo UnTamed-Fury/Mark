@@ -26,6 +26,26 @@ export interface AfkActivityEvent {
   readonly reason: string;
   readonly timestamp: number;
   readonly durationMs?: number;
+  readonly scope?: AfkScope;
+}
+
+export type AfkEventListener = (event: AfkActivityEvent) => void;
+const afkEventListeners = new Set<AfkEventListener>();
+
+export function onAfkEvent(listener: AfkEventListener): () => void {
+  afkEventListeners.add(listener);
+  return () => afkEventListeners.delete(listener);
+}
+
+function emitAfkEvent(event: AfkActivityEvent): void {
+  recentAfkEvents.push(event);
+  for (const listener of afkEventListeners) {
+    try {
+      listener(event);
+    } catch (err) {
+      log.error('Error in afk event listener:', err);
+    }
+  }
 }
 
 // Memory cache:
@@ -132,12 +152,13 @@ export function setAfk(
     }
   }
 
-  recentAfkEvents.push({
+  emitAfkEvent({
     userId,
     platform,
     type: 'set',
     reason: entry.reason,
     timestamp,
+    scope,
   });
 
   saveAfkStore();
@@ -200,13 +221,14 @@ export function clearAfk(
   const now = Date.now();
   const durationMs = now - entry.timestamp;
 
-  recentAfkEvents.push({
+  emitAfkEvent({
     userId,
     platform,
     type: 'cleared',
     reason: entry.reason,
     timestamp: now,
     durationMs,
+    scope: entry.scope,
   });
 
   saveAfkStore();

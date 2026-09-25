@@ -2,9 +2,20 @@ import { type Client as DiscordClient, EmbedBuilder as DiscordEmbedBuilder } fro
 import { EmbedBuilder as FluxerEmbedBuilder } from '@fluxerjs/core';
 import { config } from '../config.js';
 import { BRAND } from '../constants.js';
-import { drainRecentAfkEvents, getActiveAfkList, formatDuration } from './afkManager.js';
+import {
+  drainRecentAfkEvents,
+  getActiveAfkList,
+  formatDuration,
+  onAfkEvent,
+  type AfkActivityEvent,
+} from './afkManager.js';
 import { createLogger, getLogsAfterId } from './logger.js';
-import { drainRecentSyncEvents, getAllLinks } from './syncManager.js';
+import {
+  drainRecentSyncEvents,
+  getAllLinks,
+  onSyncEvent,
+  type SyncEvent,
+} from './syncManager.js';
 import { getDiscordClient } from '../platforms/discord/client.js';
 import { getFluxerClient } from '../platforms/fluxer/client.js';
 
@@ -238,6 +249,90 @@ export async function flushSystemLogs(): Promise<void> {
   }
 }
 
+export async function logAfkEvent(event: AfkActivityEvent): Promise<void> {
+  const targetAfkChannelId = config.afkLogChannelId || config.logChannelId;
+  if (!targetAfkChannelId) return;
+
+  try {
+    const target = await resolveLogTarget(targetAfkChannelId, 'afk_log_channel_id');
+    if (!target) return;
+
+    const embedColor = config.embedColor || BRAND.color;
+    let title: string;
+    let description: string;
+
+    if (event.type === 'set') {
+      title = 'AFK Status Set';
+      description =
+        `• **User**: <@${event.userId}> [${event.platform}]\n` +
+        `• **Scope**: ${event.scope || 'global'}\n` +
+        `• **Reason**: ${event.reason || 'AFK'}\n` +
+        `• **Time**: <t:${Math.floor(Date.now() / 1000)}:R>`;
+    } else {
+      title = 'AFK Status Cleared';
+      const durationStr = event.durationMs ? formatDuration(event.durationMs) : 'just now';
+      description =
+        `• **User**: <@${event.userId}> [${event.platform}]\n` +
+        `• **Duration**: ${durationStr}\n` +
+        `• **Time**: <t:${Math.floor(Date.now() / 1000)}:R>`;
+    }
+
+    const payload: EmbedPayload = {
+      title,
+      description,
+      color: embedColor,
+      timestamp: new Date(),
+    };
+
+    await target.sendBatches([payload]);
+  } catch (err) {
+    log.error('Failed to dispatch instant AFK event log:', err);
+  }
+}
+
+export async function logSyncEvent(event: SyncEvent): Promise<void> {
+  const targetSyncChannelId = config.syncLogChannelId || config.logChannelId;
+  if (!targetSyncChannelId) return;
+
+  try {
+    const target = await resolveLogTarget(targetSyncChannelId, 'sync_log_channel_id');
+    if (!target) return;
+
+    let title: string;
+    let description: string;
+    let color: number;
+
+    if (event.type === 'link') {
+      title = 'Account Linked';
+      description =
+        `• **Discord**: <@${event.discordId}> (\`${event.discordId}\`)\n` +
+        `• **Fluxer**: <@${event.fluxerId}> (\`${event.fluxerId}\`)\n` +
+        `• **Status**: Synchronized\n` +
+        `• **Time**: <t:${Math.floor(Date.now() / 1000)}:R>`;
+      color = config.embedColor || BRAND.color;
+    } else {
+      title = 'Account Unlinked';
+      description =
+        `• **Discord**: <@${event.discordId}> (\`${event.discordId}\`)\n` +
+        `• **Fluxer**: <@${event.fluxerId}> (\`${event.fluxerId}\`)\n` +
+        `• **Status**: Unlinked\n` +
+        `• **Time**: <t:${Math.floor(Date.now() / 1000)}:R>`;
+      color = COLOR_ERROR;
+    }
+
+    const payload: EmbedPayload = {
+      title,
+      description,
+      color,
+      timestamp: new Date(),
+    };
+
+    await target.sendBatches([payload]);
+  } catch (err) {
+    log.error('Failed to dispatch instant Sync event log:', err);
+  }
+}
+
 export async function flushLogsImmediately(): Promise<void> {
   await flushSystemLogs();
 }
@@ -250,18 +345,25 @@ export function startPeriodicLogging(client?: DiscordClient): void {
   if (timersStarted) return;
   timersStarted = true;
 
-  const targetLogChannelId = config.logChannelId;
-  const targetAfkChannelId = config.afkLogChannelId || targetLogChannelId;
-  const targetSyncChannelId = config.syncLogChannelId || targetLogChannelId;
+  // Real-time event log dispatchers
+  onAfkEvent((event) => {
+    logAfkEvent(event).catch((err) => log.error('Error in instant AFK event dispatch:', err));
+  });
 
-  // 1. Every 1 minute: Flush recent system & runtime logs
+  onSyncEvent((event) => {
+    logSyncEvent(event).catch((err) => log.error('Error in instant Sync event dispatch:', err));
+  });
+
+  // 1. Flush recent system & runtime logs (every 15s by default)
+  const flushIntervalSec = config.logFlushIntervalSec || 15;
   setInterval(async () => {
     await flushSystemLogs();
-  }, (config.logFlushIntervalSec || 60) * 1000).unref();
+  }, flushIntervalSec * 1000).unref();
 
   // 2. AFK Activity Summary
   setInterval(async () => {
     try {
+      const targetAfkChannelId = config.afkLogChannelId || config.logChannelId;
       const events = drainRecentAfkEvents();
       const activeAfks = getActiveAfkList();
 
@@ -326,6 +428,7 @@ export function startPeriodicLogging(client?: DiscordClient): void {
           return;
         }
 
+        const targetSyncChannelId = config.syncLogChannelId || config.logChannelId;
         const target = await resolveLogTarget(targetSyncChannelId, 'sync_log_channel_id');
         if (!target) return;
 

@@ -102,14 +102,17 @@ const afkCommand: FluxerCommand = {
 
     try {
       const reactions = await promptMsg.awaitReactions({
-        filter: (reaction, user) =>
-          user.id === message.author.id && ['🌐', '🏠', '❌'].includes(reaction.emoji.name ?? ''),
+        filter: (reaction, user) => {
+          const name = reaction.emoji?.name || reaction.emojiIdentifier || '';
+          return user.id === message.author.id && ['🌐', '🏠', '❌'].includes(name);
+        },
         max: 1,
         time: 60_000,
       });
 
       const collected = reactions.first();
-      const emojiName = collected?.reaction?.emoji?.name ?? collected?.reaction?.emojiIdentifier;
+      const emojiName =
+        collected?.reaction?.emoji?.name || collected?.reaction?.emojiIdentifier || '';
 
       if (!emojiName || emojiName === '❌') {
         const cancelEmbed = createFluxerBrandEmbed(message)
@@ -133,8 +136,8 @@ const afkCommand: FluxerCommand = {
         );
 
       await promptMsg.edit({ embeds: [successEmbed] }).catch(() => {});
-    } catch {
-      // Timeout after 60s
+    } catch (err) {
+      log.debug('Fluxer AFK reaction collector ended:', err);
     }
   },
 };

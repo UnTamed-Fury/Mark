@@ -18,6 +18,12 @@ export default defineRailway(() => {
       DISCORD_BOT_TOKEN: preserve(),
       FLUXER_BOT_TOKEN: preserve(),
       PREFIX: preserve(),
+      LOG_CHANNEL_ID: preserve(),
+      AFK_LOG_CHANNEL_ID: preserve(),
+      SYNC_LOG_CHANNEL_ID: preserve(),
+      LOG_SERVER_ID: preserve(),
+      DISCORD_SERVER_ID: preserve(),
+      FLUXER_SERVER_ID: preserve(),
     },
   });
 
