@@ -13,6 +13,7 @@ import { BRAND } from '../../constants.js';
 import {
   AFK_COMMAND_META,
   SYNC_COMMAND_META,
+  BACKUP_COMMAND_META,
 } from '../../core/commandsData.js';
 import {
   STANDARD_COMMANDS,
@@ -21,6 +22,7 @@ import {
 } from '../../core/commandEngine.js';
 import { setAfk, getRelativeTimestamp, type AfkScope } from '../../core/afkManager.js';
 import { createSyncCode, claimSyncCode, getLinkedFluxerId, unlinkUser } from '../../core/syncManager.js';
+import { performCloudBackup, restoreFromCloud } from '../../core/cloudBackup.js';
 import { createLogger } from '../../core/logger.js';
 import { createBrandEmbed, sendEmbed } from './embeds.js';
 import { getFluxerClient } from '../fluxer/client.js';
@@ -66,7 +68,9 @@ function adaptStandardDiscordCommand(cmd: StandardCommandDef): DiscordCommand {
   };
 }
 
-const standardDiscordCommands: DiscordCommand[] = STANDARD_COMMANDS.map(adaptStandardDiscordCommand);
+const standardDiscordCommands: DiscordCommand[] = STANDARD_COMMANDS
+  .filter((cmd) => cmd.name !== BACKUP_COMMAND_META.name)
+  .map(adaptStandardDiscordCommand);
 
 const helpCommand: DiscordCommand = {
   name: 'help',
@@ -371,10 +375,87 @@ const syncCommand: DiscordCommand = {
   },
 };
 
+const backupCommand: DiscordCommand = {
+  name: BACKUP_COMMAND_META.name,
+  aliases: BACKUP_COMMAND_META.aliases,
+  description: BACKUP_COMMAND_META.description,
+  async execute(message: Message, args: string[]): Promise<void> {
+    const sub = (args[0] ?? '').toLowerCase();
+    const isOwner =
+      message.author.id === '1130510553266278501' ||
+      (!!config.ownerId && message.author.id === config.ownerId);
+
+    if (sub === 'now' || sub === 'snapshot') {
+      if (!isOwner) {
+        const embed = createBrandEmbed(message)
+          .setTitle('Permission Denied')
+          .setDescription('You do not have permission to trigger cloud backups. Restricted to bot administrators.');
+        await sendEmbed(message, embed);
+        return;
+      }
+
+      const pendingEmbed = createBrandEmbed(message)
+        .setTitle('Cloud Backup In Progress')
+        .setDescription('Creating snapshot of persistent data and dispatching to cloud backup channel...');
+      const msg = await sendEmbed(message, pendingEmbed);
+
+      const success = await performCloudBackup(`manual_by_${message.author.username}`);
+      const resultEmbed = createBrandEmbed(message)
+        .setTitle(success ? 'Cloud Backup Successful' : 'Cloud Backup Failed')
+        .setDescription(
+          success
+            ? 'State snapshot was successfully created, chunked, and dispatched to the cloud backup channel.'
+            : 'Failed to dispatch cloud backup. Please check logs and channel permissions.'
+        );
+      await msg.edit({ embeds: [resultEmbed] }).catch(() => sendEmbed(message, resultEmbed));
+      return;
+    }
+
+    if (sub === 'restore') {
+      if (!isOwner) {
+        const embed = createBrandEmbed(message)
+          .setTitle('Permission Denied')
+          .setDescription('You do not have permission to trigger state restoration. Restricted to bot administrators.');
+        await sendEmbed(message, embed);
+        return;
+      }
+
+      const pendingEmbed = createBrandEmbed(message)
+        .setTitle('Disaster Recovery In Progress')
+        .setDescription('Fetching latest cloud backup snapshot and restoring state...');
+      const msg = await sendEmbed(message, pendingEmbed);
+
+      const success = await restoreFromCloud(true);
+      const resultEmbed = createBrandEmbed(message)
+        .setTitle(success ? 'Cloud Restore Successful' : 'Cloud Restore Failed')
+        .setDescription(
+          success
+            ? 'Persistent data successfully restored from cloud backup. In-memory stores have been reloaded.'
+            : 'Failed to restore state from cloud backup. Please check logs and channel permissions.'
+        );
+      await msg.edit({ embeds: [resultEmbed] }).catch(() => sendEmbed(message, resultEmbed));
+      return;
+    }
+
+    const standardDef = STANDARD_COMMANDS.find((c) => c.name === BACKUP_COMMAND_META.name);
+    if (standardDef) {
+      const payload = standardDef.getPayload({ platform: 'discord', args });
+      const embed = createBrandEmbed(message)
+        .setTitle(payload.title)
+        .setDescription(payload.description);
+      if (payload.fields) {
+        embed.addFields(payload.fields.map((f) => ({ name: f.name, value: f.value, inline: f.inline })));
+      }
+      await sendEmbed(message, embed);
+    }
+  },
+};
+
 export const COMMANDS: readonly DiscordCommand[] = [
   ...standardDiscordCommands,
   afkCommand,
   syncCommand,
+  backupCommand,
   helpCommand,
 ];
 

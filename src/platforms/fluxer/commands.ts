@@ -4,6 +4,7 @@ import { BRAND } from '../../constants.js';
 import {
   AFK_COMMAND_META,
   SYNC_COMMAND_META,
+  BACKUP_COMMAND_META,
 } from '../../core/commandsData.js';
 import {
   STANDARD_COMMANDS,
@@ -12,6 +13,7 @@ import {
 } from '../../core/commandEngine.js';
 import { setAfk, getRelativeTimestamp, type AfkScope } from '../../core/afkManager.js';
 import { createSyncCode, claimSyncCode, getLinkedDiscordId, unlinkUser } from '../../core/syncManager.js';
+import { performCloudBackup, restoreFromCloud } from '../../core/cloudBackup.js';
 import { createLogger } from '../../core/logger.js';
 import { createFluxerBrandEmbed, sendFluxerEmbed } from './embeds.js';
 import { getDiscordClient } from '../discord/client.js';
@@ -57,7 +59,9 @@ function adaptStandardFluxerCommand(cmd: StandardCommandDef): FluxerCommand {
   };
 }
 
-const standardFluxerCommands: FluxerCommand[] = STANDARD_COMMANDS.map(adaptStandardFluxerCommand);
+const standardFluxerCommands: FluxerCommand[] = STANDARD_COMMANDS
+  .filter((cmd) => cmd.name !== BACKUP_COMMAND_META.name)
+  .map(adaptStandardFluxerCommand);
 
 const helpCommand: FluxerCommand = {
   name: 'help',
@@ -310,10 +314,98 @@ const syncCommand: FluxerCommand = {
   },
 };
 
+const backupCommand: FluxerCommand = {
+  name: BACKUP_COMMAND_META.name,
+  aliases: BACKUP_COMMAND_META.aliases,
+  description: BACKUP_COMMAND_META.description,
+  async execute(message: Message, args: string[]): Promise<void> {
+    const sub = (args[0] ?? '').toLowerCase();
+    const linkedDiscordId = getLinkedDiscordId(message.author.id);
+    const isOwner =
+      message.author.id === '1475646107256324606' ||
+      linkedDiscordId === '1130510553266278501' ||
+      (!!config.ownerId && (message.author.id === config.ownerId || linkedDiscordId === config.ownerId));
+
+    if (sub === 'now' || sub === 'snapshot') {
+      if (!isOwner) {
+        const embed = createFluxerBrandEmbed(message)
+          .setTitle('Permission Denied')
+          .setDescription('You do not have permission to trigger cloud backups. Restricted to bot administrators.');
+        await sendFluxerEmbed(message, embed);
+        return;
+      }
+
+      const pendingEmbed = createFluxerBrandEmbed(message)
+        .setTitle('Cloud Backup In Progress')
+        .setDescription('Creating snapshot of persistent data and dispatching to cloud backup channel...');
+      const msg = await sendFluxerEmbed(message, pendingEmbed);
+
+      const username = message.author?.username ?? 'admin';
+      const success = await performCloudBackup(`manual_by_${username}`);
+      const resultEmbed = createFluxerBrandEmbed(message)
+        .setTitle(success ? 'Cloud Backup Successful' : 'Cloud Backup Failed')
+        .setDescription(
+          success
+            ? 'State snapshot was successfully created, chunked, and dispatched to the cloud backup channel.'
+            : 'Failed to dispatch cloud backup. Please check logs and channel permissions.'
+        );
+      if (msg && typeof (msg as any).edit === 'function') {
+        await (msg as any).edit({ embeds: [resultEmbed] }).catch(() => sendFluxerEmbed(message, resultEmbed));
+      } else {
+        await sendFluxerEmbed(message, resultEmbed);
+      }
+      return;
+    }
+
+    if (sub === 'restore') {
+      if (!isOwner) {
+        const embed = createFluxerBrandEmbed(message)
+          .setTitle('Permission Denied')
+          .setDescription('You do not have permission to trigger state restoration. Restricted to bot administrators.');
+        await sendFluxerEmbed(message, embed);
+        return;
+      }
+
+      const pendingEmbed = createFluxerBrandEmbed(message)
+        .setTitle('Disaster Recovery In Progress')
+        .setDescription('Fetching latest cloud backup snapshot and restoring state...');
+      const msg = await sendFluxerEmbed(message, pendingEmbed);
+
+      const success = await restoreFromCloud(true);
+      const resultEmbed = createFluxerBrandEmbed(message)
+        .setTitle(success ? 'Cloud Restore Successful' : 'Cloud Restore Failed')
+        .setDescription(
+          success
+            ? 'Persistent data successfully restored from cloud backup. In-memory stores have been reloaded.'
+            : 'Failed to restore state from cloud backup. Please check logs and channel permissions.'
+        );
+      if (msg && typeof (msg as any).edit === 'function') {
+        await (msg as any).edit({ embeds: [resultEmbed] }).catch(() => sendFluxerEmbed(message, resultEmbed));
+      } else {
+        await sendFluxerEmbed(message, resultEmbed);
+      }
+      return;
+    }
+
+    const standardDef = STANDARD_COMMANDS.find((c) => c.name === BACKUP_COMMAND_META.name);
+    if (standardDef) {
+      const payload = standardDef.getPayload({ platform: 'fluxer', args });
+      const embed = createFluxerBrandEmbed(message)
+        .setTitle(payload.title)
+        .setDescription(payload.description);
+      if (payload.fields && payload.fields.length > 0) {
+        embed.addFields(...payload.fields.map((f) => ({ name: f.name, value: f.value, inline: f.inline })));
+      }
+      await sendFluxerEmbed(message, embed);
+    }
+  },
+};
+
 export const COMMANDS: readonly FluxerCommand[] = [
   ...standardFluxerCommands,
   afkCommand,
   syncCommand,
+  backupCommand,
   helpCommand,
 ];
 

@@ -24,6 +24,9 @@ export default defineRailway(() => {
       LOG_SERVER_ID: preserve(),
       DISCORD_SERVER_ID: preserve(),
       FLUXER_SERVER_ID: preserve(),
+      CLOUD_BACKUP_ENABLED: preserve(),
+      CLOUD_BACKUP_CHANNEL_ID: preserve(),
+      CLOUD_BACKUP_SERVER_ID: preserve(),
     },
   });
 

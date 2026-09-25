@@ -159,3 +159,10 @@ export const UPTIME_COMMAND_META = {
   aliases: ['up', 'online', 'runtime'],
   description: 'Displays how long the bot has been online, start time, and resource usage.',
 } as const;
+
+export const BACKUP_COMMAND_META = {
+  name: 'backup',
+  aliases: ['dr', 'snapshot', 'restore'],
+  description: 'Disaster recovery and cloud backup status, manual snapshot, and restore.',
+} as const;
+

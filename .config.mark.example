@@ -83,13 +83,13 @@ sister_sites:
 # If files exceed the max part size, they are automatically chunked into numbered parts and reassembled on restore.
 cloud_backup:
   # Set to true to activate automated cloud backups and disaster recovery
-  enabled: false
+  enabled: true
   # Platform hosting the backup channel ("discord" or "fluxer")
   platform: "discord"
   # Server (Guild) ID where the backup channel is located
-  server_id: ""
+  server_id: "1256614479836221532"
   # Private text channel ID designated exclusively for backup file uploads
-  channel_id: ""
+  channel_id: "1552751072689262723"
   # Interval in minutes between periodic cloud backups (default: 60)
   backup_interval_min: 60
   # Automatically pull and restore the latest snapshot on bot boot (default: true)

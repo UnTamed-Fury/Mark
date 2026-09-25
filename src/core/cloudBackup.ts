@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { AttachmentBuilder as DiscordAttachmentBuilder, type TextBasedChannel as DiscordTextChannel } from 'discord.js';
 import { AttachmentBuilder as FluxerAttachmentBuilder, type TextChannel as FluxerTextChannel } from '@fluxerjs/core';
 import { config } from '../config.js';
@@ -12,8 +13,6 @@ import {
   getSyncFilePath,
   getConfigMarkFilePath,
 } from './dataDir.js';
-import { getDiscordClient } from '../platforms/discord/client.js';
-import { getFluxerClient } from '../platforms/fluxer/client.js';
 
 const log = createLogger('CloudBackup');
 
@@ -21,6 +20,26 @@ const BACKUP_HEADER_TAG = '[AnimeX Cloud Backup] v1';
 
 let schedulerStarted = false;
 let backupInitialized = false;
+
+let lastBackupTime: number | null = null;
+let lastBackupReason: string | null = null;
+let lastBackupSuccess: boolean | null = null;
+let lastRestoreTime: number | null = null;
+let lastRestoreSuccess: boolean | null = null;
+
+export interface BackupStatusInfo {
+  readonly enabled: boolean;
+  readonly platform: 'discord' | 'fluxer';
+  readonly channelId: string | null;
+  readonly intervalMin: number;
+  readonly autoRestore: boolean;
+  readonly lastBackupTime: number | null;
+  readonly lastBackupReason: string | null;
+  readonly lastBackupSuccess: boolean | null;
+  readonly lastRestoreTime: number | null;
+  readonly lastRestoreSuccess: boolean | null;
+  readonly files: Array<{ name: string; sizeBytes: number; exists: boolean }>;
+}
 
 export interface BackupFilePayload {
   name: string;
@@ -53,6 +72,7 @@ export function chunkBuffer(buffer: Buffer, maxChunkSize: number): Buffer[] {
 }
 
 async function getDiscordBackupChannel(channelId: string): Promise<BackupChannel | null> {
+  const { getDiscordClient } = await import('../platforms/discord/client.js');
   const client = getDiscordClient();
   if (!client?.isReady()) return null;
 
@@ -92,6 +112,7 @@ async function getDiscordBackupChannel(channelId: string): Promise<BackupChannel
 }
 
 async function getFluxerBackupChannel(channelId: string): Promise<BackupChannel | null> {
+  const { getFluxerClient } = await import('../platforms/fluxer/client.js');
   const client = getFluxerClient();
   if (!client?.isReady()) return null;
 
@@ -192,12 +213,48 @@ export async function downloadAndReassembleAttachments(
   return result;
 }
 
+export function getBackupStatus(): BackupStatusInfo {
+  const trackedFiles = [
+    { localPath: getAfkFilePath(), fileName: 'afk.json' },
+    { localPath: getSyncFilePath(), fileName: 'sync.json' },
+    { localPath: getConfigMarkFilePath(), fileName: '.config.mark' },
+  ];
+
+  const files = trackedFiles.map((f) => {
+    const exists = fs.existsSync(f.localPath);
+    let sizeBytes = 0;
+    if (exists) {
+      try {
+        sizeBytes = fs.statSync(f.localPath).size;
+      } catch {
+        sizeBytes = 0;
+      }
+    }
+    return { name: f.fileName, sizeBytes, exists };
+  });
+
+  return {
+    enabled: config.cloudBackupEnabled,
+    platform: config.cloudBackupPlatform,
+    channelId: config.cloudBackupChannelId,
+    intervalMin: config.cloudBackupIntervalMin,
+    autoRestore: config.cloudBackupAutoRestore,
+    lastBackupTime,
+    lastBackupReason,
+    lastBackupSuccess,
+    lastRestoreTime,
+    lastRestoreSuccess,
+    files,
+  };
+}
+
 export async function performCloudBackup(reason = 'scheduled'): Promise<boolean> {
   if (!config.cloudBackupEnabled) return false;
 
   const target = await resolveBackupChannel();
   if (!target) {
     log.warn('Cloud backup enabled but backup channel could not be accessed. Skipping backup.');
+    lastBackupSuccess = false;
     return false;
   }
 
@@ -211,11 +268,13 @@ export async function performCloudBackup(reason = 'scheduled'): Promise<boolean>
 
     const maxPartBytes = Math.max(1, config.cloudBackupMaxPartSizeMb || 8) * 1024 * 1024;
     const payloads: BackupFilePayload[] = [];
-    const archivedNames: string[] = [];
+    const archivedSummaries: string[] = [];
 
     for (const item of filesToBackup) {
       if (fs.existsSync(item.localPath)) {
         const fileBuffer = fs.readFileSync(item.localPath);
+        const checksum = crypto.createHash('sha256').update(fileBuffer).digest('hex').slice(0, 10);
+
         if (fileBuffer.length > maxPartBytes) {
           const chunks = chunkBuffer(fileBuffer, maxPartBytes);
           for (let i = 0; i < chunks.length; i++) {
@@ -224,10 +283,10 @@ export async function performCloudBackup(reason = 'scheduled'): Promise<boolean>
               buffer: chunks[i]!,
             });
           }
-          archivedNames.push(`${item.fileName} (${chunks.length} parts)`);
+          archivedSummaries.push(`• **${item.fileName}**: ${fileBuffer.length}B, ${chunks.length} parts, sha256:\`${checksum}\``);
         } else {
           payloads.push({ name: item.fileName, buffer: fileBuffer });
-          archivedNames.push(item.fileName);
+          archivedSummaries.push(`• **${item.fileName}**: ${fileBuffer.length}B, sha256:\`${checksum}\``);
         }
       }
     }
@@ -244,23 +303,29 @@ export async function performCloudBackup(reason = 'scheduled'): Promise<boolean>
       `• **Timestamp**: \`${timestamp}\` (${isoTime})\n` +
       `• **Reason**: \`${reason}\`\n` +
       `• **Data Directory**: \`${dataDir}\`\n` +
-      `• **Archived Files**: ${archivedNames.join(', ')}`;
+      `• **Archived Files**:\n${archivedSummaries.join('\n')}`;
 
     await target.sendBackup(content, payloads);
-    log.info(`Cloud backup dispatched to ${target.platform} (Reason: ${reason}, Files: ${archivedNames.join(', ')})`);
+    lastBackupTime = timestamp;
+    lastBackupReason = reason;
+    lastBackupSuccess = true;
+
+    log.info(`Cloud backup dispatched to ${target.platform} (Reason: ${reason}, Parts: ${payloads.length})`);
     return true;
   } catch (error) {
+    lastBackupSuccess = false;
     log.error('Failed to dispatch cloud backup:', error);
     return false;
   }
 }
 
-export async function restoreFromCloud(): Promise<boolean> {
-  if (!config.cloudBackupEnabled || !config.cloudBackupAutoRestore) return false;
+export async function restoreFromCloud(force = false): Promise<boolean> {
+  if (!config.cloudBackupEnabled || (!config.cloudBackupAutoRestore && !force)) return false;
 
   const target = await resolveBackupChannel();
   if (!target) {
     log.warn('Cloud restore requested but backup channel could not be accessed. Skipping.');
+    lastRestoreSuccess = false;
     return false;
   }
 
@@ -276,12 +341,13 @@ export async function restoreFromCloud(): Promise<boolean> {
     const singleFiles = await downloadAndReassembleAttachments(backupMessage.attachments);
     if (singleFiles.length === 0) {
       log.warn('Could not download any attachments from backup message.');
+      lastRestoreSuccess = false;
       return false;
     }
 
     for (const file of singleFiles) {
       const destPath = path.join(dataDir, file.name);
-      const tempPath = `${destPath}.tmp`;
+      const tempPath = `${destPath}.${process.pid}.${Date.now()}.tmp`;
       fs.writeFileSync(tempPath, file.buffer);
       fs.renameSync(tempPath, destPath);
       log.info(`Restored ${file.name} (${file.buffer.length} bytes) to ${destPath}`);
@@ -289,9 +355,13 @@ export async function restoreFromCloud(): Promise<boolean> {
 
     loadAfkStore();
     loadSyncStore();
+    lastRestoreTime = Date.now();
+    lastRestoreSuccess = true;
+
     log.info('Cloud backup restoration complete. Persistent state synchronized.');
     return true;
   } catch (error) {
+    lastRestoreSuccess = false;
     log.error('Failed to restore from cloud backup:', error);
     return false;
   }
