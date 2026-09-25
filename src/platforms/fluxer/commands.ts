@@ -39,7 +39,7 @@ function adaptStandardFluxerCommand(cmd: StandardCommandDef): FluxerCommand {
         // ws not yet connected or in mock test environment
       }
 
-      const payload = cmd.getPayload({ wsPing, args });
+      const payload = cmd.getPayload({ wsPing, args, platform: 'fluxer' });
       const embed = createFluxerBrandEmbed(message)
         .setTitle(payload.title)
         .setDescription(payload.description);

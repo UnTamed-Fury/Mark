@@ -15,7 +15,9 @@ import {
   getTicketCommandBody,
   PING_COMMAND_META,
   calculatePingDetails,
+  UPTIME_COMMAND_META,
 } from './commandsData.js';
+import { formatDuration } from './afkManager.js';
 
 export interface CommandEmbedPayload {
   readonly title: string;
@@ -28,7 +30,7 @@ export interface StandardCommandDef {
   readonly name: string;
   readonly aliases?: readonly string[];
   readonly description: string;
-  getPayload(ctx: { wsPing?: number; args?: string[] }): CommandEmbedPayload;
+  getPayload(ctx: { wsPing?: number; args?: string[]; platform?: 'discord' | 'fluxer' }): CommandEmbedPayload;
 }
 
 export function buildFaqPayload(rawCategory?: string, prefix = config.prefix): CommandEmbedPayload {
@@ -210,5 +212,35 @@ export const STANDARD_COMMANDS: readonly StandardCommandDef[] = [
     aliases: ['questions', 'qna', 'ask'],
     description: 'Frequently asked questions. Use <prefix>faq <category> or <prefix>faq for a list.',
     getPayload: (ctx) => buildFaqPayload(ctx.args?.[0]),
+  },
+  {
+    name: UPTIME_COMMAND_META.name,
+    aliases: UPTIME_COMMAND_META.aliases,
+    description: UPTIME_COMMAND_META.description,
+    getPayload: (ctx) => {
+      const uptimeMs = Math.floor(process.uptime() * 1000);
+      const startTimestampSec = Math.floor((Date.now() - uptimeMs) / 1000);
+      const uptimeStr = formatDuration(uptimeMs);
+      const mem = process.memoryUsage();
+      const heapMB = (mem.heapUsed / 1024 / 1024).toFixed(1);
+      const rssMB = (mem.rss / 1024 / 1024).toFixed(1);
+
+      const isFluxer = ctx.platform === 'fluxer';
+      const bootTimeText = isFluxer
+        ? `${uptimeStr} ago`
+        : `<t:${startTimestampSec}:F> (<t:${startTimestampSec}:R>)`;
+
+      return {
+        title: '⏱️ AnimeX Bot • Uptime & Status',
+        description: 'The bot process is active and fully operational.',
+        fields: [
+          { name: '⏳ Uptime', value: `**${uptimeStr}**`, inline: true },
+          { name: '🚀 Online Since', value: bootTimeText, inline: true },
+          { name: '💾 Memory', value: `\`${heapMB} MB / ${rssMB} MB\``, inline: true },
+          { name: '🟢 Status', value: '`Healthy`', inline: true },
+          { name: '⚙️ Runtime', value: `\`Node ${process.version}\``, inline: true },
+        ],
+      };
+    },
   },
 ];

@@ -154,4 +154,11 @@ export const SYNC_COMMAND_META = {
   description: 'Links your Discord and Fluxer accounts for cross-platform AFK.',
 } as const;
 
+export const UPTIME_COMMAND_META = {
+  name: 'uptime',
+  aliases: ['up', 'online', 'runtime'],
+  description: 'Displays how long the bot has been online, start time, and resource usage.',
+} as const;
+
+
 

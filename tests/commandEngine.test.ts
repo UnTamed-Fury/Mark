@@ -11,7 +11,7 @@ import {
 import { FAQ_CATEGORIES } from '../src/constants.js';
 
 describe('Universal Command Engine', () => {
-  it('registers all 10 standard commands', () => {
+  it('registers all 11 standard commands', () => {
     const names = STANDARD_COMMANDS.map((c) => c.name);
     expect(names).toContain('website');
     expect(names).toContain('drama');
@@ -23,6 +23,7 @@ describe('Universal Command Engine', () => {
     expect(names).toContain('ticket');
     expect(names).toContain('ping');
     expect(names).toContain('faq');
+    expect(names).toContain('uptime');
   });
 
   it('builds FAQ index and category responses', () => {
@@ -50,6 +51,22 @@ describe('Universal Command Engine', () => {
 
     const helpUnknown = buildHelpPayload(STANDARD_COMMANDS, 'unknown_cmd');
     expect(helpUnknown.title).toBe('Unknown Command');
+  });
+
+  it('generates rich uptime and health metrics payload', () => {
+    const uptimeCmd = STANDARD_COMMANDS.find((c) => c.name === 'uptime')!;
+    expect(uptimeCmd).toBeDefined();
+
+    const discordPayload = uptimeCmd.getPayload({ wsPing: 20, args: [], platform: 'discord' });
+    expect(discordPayload.title).toContain('Uptime');
+    expect(discordPayload.fields?.some((f) => f.name.includes('Uptime'))).toBe(true);
+    expect(discordPayload.fields?.some((f) => f.name.includes('Online Since'))).toBe(true);
+    expect(discordPayload.fields?.some((f) => f.name.includes('Memory'))).toBe(true);
+
+    const fluxerPayload = uptimeCmd.getPayload({ wsPing: 20, args: [], platform: 'fluxer' });
+    expect(fluxerPayload.title).toContain('Uptime');
+    const onlineField = fluxerPayload.fields?.find((f) => f.name.includes('Online Since'));
+    expect(onlineField?.value).toContain('ago');
   });
 });
 

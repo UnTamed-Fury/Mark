@@ -47,7 +47,7 @@ function adaptStandardDiscordCommand(cmd: StandardCommandDef): DiscordCommand {
         // ws not yet connected or in mock test environment
       }
 
-      const payload = cmd.getPayload({ wsPing, args });
+      const payload = cmd.getPayload({ wsPing, args, platform: 'discord' });
       const embed = createBrandEmbed(message)
         .setTitle(payload.title)
         .setDescription(payload.description);
