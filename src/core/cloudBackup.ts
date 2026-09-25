@@ -263,10 +263,18 @@ export async function performCloudBackup(reason = 'scheduled'): Promise<boolean>
     saveSyncStore();
 
     const dataDir = getDataDir();
+    let configMarkPath = getConfigMarkFilePath();
+    if (!fs.existsSync(configMarkPath)) {
+      const alt = path.join(dataDir, 'config.mark');
+      if (fs.existsSync(alt)) {
+        configMarkPath = alt;
+      }
+    }
+
     const filesToBackup = [
       { localPath: getAfkFilePath(), fileName: 'afk.json' },
       { localPath: getSyncFilePath(), fileName: 'sync.json' },
-      { localPath: getConfigMarkFilePath(), fileName: '.config.mark' },
+      { localPath: configMarkPath, fileName: '.config.mark' },
     ];
 
     const maxPartBytes = Math.max(1, config.cloudBackupMaxPartSizeMb || 8) * 1024 * 1024;
@@ -400,8 +408,17 @@ export function startCloudBackupScheduler(): void {
 
   schedulerStarted = true;
 
-  const intervalMin = Math.max(1, config.cloudBackupIntervalMin || 60);
+  const intervalMin = Math.max(1, config.cloudBackupIntervalMin || 5);
   const intervalMs = intervalMin * 60 * 1000;
+
+  // Run initial snapshot backup 15 seconds after boot
+  setTimeout(async () => {
+    try {
+      await performCloudBackup('startup_sync');
+    } catch (err) {
+      log.error('Error in initial startup cloud backup:', err);
+    }
+  }, 15_000).unref();
 
   setInterval(async () => {
     try {

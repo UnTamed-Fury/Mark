@@ -7,6 +7,7 @@ import {
   ComponentType,
   type ButtonInteraction,
   MessageFlags,
+  PermissionFlagsBits,
 } from 'discord.js';
 import { config } from '../../config.js';
 import { BRAND } from '../../constants.js';
@@ -403,18 +404,35 @@ const backupCommand: DiscordCommand = {
   description: BACKUP_COMMAND_META.description,
   async execute(message: Message, args: string[]): Promise<void> {
     const sub = (args[0] ?? '').toLowerCase();
-    const isOwner =
-      message.author.id === '1130510553266278501' ||
-      (!!config.ownerId && message.author.id === config.ownerId);
+    const authorId = message.author.id;
+    const linkedFluxerId = getLinkedFluxerId(authorId);
+    const isDevOrOwner =
+      authorId === '1130510553266278501' || // Fury Discord ID
+      authorId === '1344082654852550788' || // Config Owner ID
+      (!!config.ownerId && authorId === config.ownerId) ||
+      linkedFluxerId === '1475646107256324606' ||
+      (!!config.ownerId && linkedFluxerId === config.ownerId);
+
+    const isServerAdmin =
+      Boolean(message.guild && message.guild.ownerId === authorId) ||
+      Boolean(
+        message.member?.permissions &&
+        typeof message.member.permissions.has === 'function' &&
+        message.member.permissions.has(PermissionFlagsBits.Administrator)
+      );
+
+    if (!isDevOrOwner && !isServerAdmin) {
+      const embed = createBrandEmbed(message)
+        .setTitle('Permission Denied')
+        .setDescription(
+          'You do not have permission to view or manage backups.\n' +
+          'This command requires server **Administrator** permissions or Bot Developer/Owner access.'
+        );
+      await sendEmbed(message, embed);
+      return;
+    }
 
     if (sub === 'now' || sub === 'snapshot') {
-      if (!isOwner) {
-        const embed = createBrandEmbed(message)
-          .setTitle('Permission Denied')
-          .setDescription('You do not have permission to trigger cloud backups. Restricted to bot administrators.');
-        await sendEmbed(message, embed);
-        return;
-      }
 
       const pendingEmbed = createBrandEmbed(message)
         .setTitle('Cloud Backup In Progress')
@@ -434,14 +452,6 @@ const backupCommand: DiscordCommand = {
     }
 
     if (sub === 'restore') {
-      if (!isOwner) {
-        const embed = createBrandEmbed(message)
-          .setTitle('Permission Denied')
-          .setDescription('You do not have permission to trigger state restoration. Restricted to bot administrators.');
-        await sendEmbed(message, embed);
-        return;
-      }
-
       const pendingEmbed = createBrandEmbed(message)
         .setTitle('Disaster Recovery In Progress')
         .setDescription('Fetching latest cloud backup snapshot and restoring state...');

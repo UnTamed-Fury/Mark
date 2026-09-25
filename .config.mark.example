@@ -90,8 +90,8 @@ cloud_backup:
   server_id: "1256614479836221532"
   # Private text channel ID designated exclusively for backup file uploads
   channel_id: "1552751072689262723"
-  # Interval in minutes between periodic cloud backups (default: 60)
-  backup_interval_min: 60
+  # Interval in minutes between periodic cloud backups (default: 5)
+  backup_interval_min: 5
   # Automatically pull and restore the latest snapshot on bot boot (default: true)
   auto_restore_on_boot: true
   # Maximum file part size in MB before chunking (Discord free tier limit is 8MB-10MB, default: 8)

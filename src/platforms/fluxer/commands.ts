@@ -1,4 +1,4 @@
-import { type Message } from '@fluxerjs/core';
+import { type Message, PermissionFlags } from '@fluxerjs/core';
 import { config } from '../../config.js';
 import { BRAND } from '../../constants.js';
 import {
@@ -342,21 +342,34 @@ const backupCommand: FluxerCommand = {
   description: BACKUP_COMMAND_META.description,
   async execute(message: Message, args: string[]): Promise<void> {
     const sub = (args[0] ?? '').toLowerCase();
-    const linkedDiscordId = getLinkedDiscordId(message.author.id);
-    const isOwner =
-      message.author.id === '1475646107256324606' ||
+    const authorId = message.author.id;
+    const linkedDiscordId = getLinkedDiscordId(authorId);
+    const isDevOrOwner =
+      authorId === '1475646107256324606' || // Fury Fluxer ID
+      authorId === '1344082654852550788' || // Config Owner ID
+      (!!config.ownerId && authorId === config.ownerId) ||
       linkedDiscordId === '1130510553266278501' ||
-      (!!config.ownerId && (message.author.id === config.ownerId || linkedDiscordId === config.ownerId));
+      (!!config.ownerId && linkedDiscordId === config.ownerId);
+
+    const isServerAdmin =
+      Boolean(
+        message.member?.permissions &&
+        typeof (message.member.permissions as any).has === 'function' &&
+        (message.member.permissions as any).has(PermissionFlags.Administrator)
+      );
+
+    if (!isDevOrOwner && !isServerAdmin) {
+      const embed = createFluxerBrandEmbed(message)
+        .setTitle('Permission Denied')
+        .setDescription(
+          'You do not have permission to view or manage backups.\n' +
+          'This command requires server **Administrator** permissions or Bot Developer/Owner access.'
+        );
+      await sendFluxerEmbed(message, embed);
+      return;
+    }
 
     if (sub === 'now' || sub === 'snapshot') {
-      if (!isOwner) {
-        const embed = createFluxerBrandEmbed(message)
-          .setTitle('Permission Denied')
-          .setDescription('You do not have permission to trigger cloud backups. Restricted to bot administrators.');
-        await sendFluxerEmbed(message, embed);
-        return;
-      }
-
       const pendingEmbed = createFluxerBrandEmbed(message)
         .setTitle('Cloud Backup In Progress')
         .setDescription('Creating snapshot of persistent data and dispatching to cloud backup channel...');
@@ -380,14 +393,6 @@ const backupCommand: FluxerCommand = {
     }
 
     if (sub === 'restore') {
-      if (!isOwner) {
-        const embed = createFluxerBrandEmbed(message)
-          .setTitle('Permission Denied')
-          .setDescription('You do not have permission to trigger state restoration. Restricted to bot administrators.');
-        await sendFluxerEmbed(message, embed);
-        return;
-      }
-
       const pendingEmbed = createFluxerBrandEmbed(message)
         .setTitle('Disaster Recovery In Progress')
         .setDescription('Fetching latest cloud backup snapshot and restoring state...');

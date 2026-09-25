@@ -139,4 +139,22 @@ describe('Fluxer Commands Registry and Executors', () => {
     expect(replies[0].embeds![0].data.title).toContain('TestUser is now AFK');
     expect(replies[0].embeds![0].data.description).toContain('Studying for exams');
   });
+
+  it('rejects unprivileged users from running backup command', async () => {
+    const { message, replies } = createMockFluxerMessage('+backup', 'random-user-id');
+    const cmd = getFluxerCommand('backup');
+    await cmd!.execute(message, []);
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0].embeds![0].data.title).toContain('Permission Denied');
+  });
+
+  it('allows owner to run backup status command', async () => {
+    const { message, replies } = createMockFluxerMessage('+backup', '1475646107256324606');
+    const cmd = getFluxerCommand('backup');
+    await cmd!.execute(message, []);
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0].embeds![0].data.title).toContain('Disaster Recovery');
+  });
 });

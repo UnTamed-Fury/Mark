@@ -298,7 +298,7 @@ function parseConfig(): AppConfig {
   const cloudBackupIntervalMin = parseNumber(
     getVal('CLOUD_BACKUP_INTERVAL_MIN', 'cloud_backup', 'backup_interval_min') ||
     getVal('CLOUD_BACKUP_INTERVAL_MIN', 'cloud_backup', 'backup-interval-min'),
-    60
+    5
   );
 
   const cloudBackupAutoRestore = parseBoolean(
