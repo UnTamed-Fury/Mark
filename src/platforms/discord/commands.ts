@@ -97,26 +97,23 @@ const afkCommand: DiscordCommand = {
       .setTitle('AFK Configuration')
       .setDescription(
         `Choose your AFK scope below for reason: **${reason}**\n\n` +
-        `🌐 **Global AFK**: Set AFK across all servers (Discord & Fluxer).\n` +
-        `🏠 **Server Only**: Set AFK only in **${serverName}**.\n` +
-        `❌ **Cancel**: Cancel AFK setup.`
+        `• **Global AFK**: Set AFK across all servers (Discord & Fluxer).\n` +
+        `• **Server Only**: Set AFK only in **${serverName}**.\n` +
+        `• **Cancel**: Cancel AFK setup.`
       );
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`afk_global_${message.author.id}`)
         .setLabel('Global AFK')
-        .setEmoji('🌐')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId(`afk_server_${message.author.id}`)
         .setLabel('Server Only')
-        .setEmoji('🏠')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`afk_cancel_${message.author.id}`)
         .setLabel('Cancel')
-        .setEmoji('❌')
         .setStyle(ButtonStyle.Danger),
     );
 
@@ -199,7 +196,7 @@ const syncCommand: DiscordCommand = {
 
       // Attempt direct DM first so the code never enters any public channel
       const dmEmbed = createBrandEmbed(message)
-        .setTitle('🔐 Private Account Sync Code')
+        .setTitle('Private Account Sync Code')
         .setDescription(
           `Your one-time link code is:\n\n` +
           `# \`${code}\`\n\n` +
@@ -222,7 +219,6 @@ const syncCommand: DiscordCommand = {
         new ButtonBuilder()
           .setCustomId(revealBtnId)
           .setLabel('Click to Reveal One-Time Code')
-          .setEmoji('🔐')
           .setStyle(ButtonStyle.Primary)
       );
 
@@ -230,10 +226,10 @@ const syncCommand: DiscordCommand = {
         .setTitle('Account Sync • One-Time Code')
         .setDescription(
           dmSent
-            ? `📩 **A private link code was sent to your DMs!**\n\n` +
+            ? `**A private link code was sent to your DMs.**\n\n` +
               `Or click the button below to reveal it ephemerally (*only you can see it*).\n` +
               `*(This prompt auto-deletes in ${config.syncCodeExpirySec || 30}s)*`
-            : `⚠️ **Could not DM you (DMs may be closed).**\n\n` +
+            : `**Could not DM you (DMs may be closed).**\n\n` +
               `Click the button below to reveal your secret code ephemerally (*only you can see it*).\n` +
               `*(This prompt auto-deletes in ${config.syncCodeExpirySec || 30}s)*`
         );
@@ -259,7 +255,7 @@ const syncCommand: DiscordCommand = {
           try {
             if (btnInteraction.user.id !== message.author.id) {
               await btnInteraction.reply({
-                content: '❌ This sync code prompt belongs to another user.',
+                content: 'This sync code prompt belongs to another user.',
                 ephemeral: true,
               });
               return;
@@ -267,7 +263,7 @@ const syncCommand: DiscordCommand = {
 
             await btnInteraction.reply({
               content:
-                `🔐 **Your Secret One-Time Sync Code is:**\n\n` +
+                `**Your Secret One-Time Sync Code is:**\n\n` +
                 `# \`${code}\`\n\n` +
                 `Switch to **Fluxer** within **${config.syncCodeExpirySec || 30} seconds** and send:\n` +
                 `\`${config.prefix}sync ${code}\`\n\n` +

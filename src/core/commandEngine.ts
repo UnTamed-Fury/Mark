@@ -200,9 +200,9 @@ export const STANDARD_COMMANDS: readonly StandardCommandDef[] = [
     aliases: PING_COMMAND_META.aliases,
     description: PING_COMMAND_META.description,
     getPayload: (ctx) => {
-      const { emoji, text } = calculatePingDetails(ctx.wsPing ?? -1);
+      const { text } = calculatePingDetails(ctx.wsPing ?? -1);
       return {
-        title: `${emoji} Latency`,
+        title: 'Latency',
         description: `WebSocket Ping: \`${text}\``,
       };
     },
@@ -231,14 +231,14 @@ export const STANDARD_COMMANDS: readonly StandardCommandDef[] = [
         : `<t:${startTimestampSec}:F> (<t:${startTimestampSec}:R>)`;
 
       return {
-        title: '⏱️ AnimeX Bot • Uptime & Status',
+        title: 'AnimeX Bot • Uptime & Status',
         description: 'The bot process is active and fully operational.',
         fields: [
-          { name: '⏳ Uptime', value: `**${uptimeStr}**`, inline: true },
-          { name: '🚀 Online Since', value: bootTimeText, inline: true },
-          { name: '💾 Memory', value: `\`${heapMB} MB / ${rssMB} MB\``, inline: true },
-          { name: '🟢 Status', value: '`Healthy`', inline: true },
-          { name: '⚙️ Runtime', value: `\`Node ${process.version}\``, inline: true },
+          { name: 'Uptime', value: `**${uptimeStr}**`, inline: true },
+          { name: 'Online Since', value: bootTimeText, inline: true },
+          { name: 'Memory', value: `\`${heapMB} MB / ${rssMB} MB\``, inline: true },
+          { name: 'Status', value: '`Healthy`', inline: true },
+          { name: 'Runtime', value: `\`Node ${process.version}\``, inline: true },
         ],
       };
     },

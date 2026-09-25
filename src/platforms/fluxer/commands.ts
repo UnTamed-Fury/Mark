@@ -174,7 +174,7 @@ const syncCommand: FluxerCommand = {
       let dmSent = false;
       try {
         const dmEmbed = createFluxerBrandEmbed(message)
-          .setTitle('🔐 Private Account Sync Code')
+          .setTitle('Private Account Sync Code')
           .setDescription(
             `Your one-time link code is:\n\n` +
             `# \`${code}\`\n\n` +
@@ -192,7 +192,7 @@ const syncCommand: FluxerCommand = {
         const noticeEmbed = createFluxerBrandEmbed(message)
           .setTitle('Account Sync • One-Time Code')
           .setDescription(
-            `📩 **A secret link code was sent to your private DMs!**\n\n` +
+            `**A secret link code was sent to your private DMs.**\n\n` +
             `Go to **Discord** within **${config.syncCodeExpirySec || 30} seconds** to complete linking.\n` +
             `*(This notice auto-deletes in 15s)*`
           );
@@ -204,7 +204,7 @@ const syncCommand: FluxerCommand = {
         const tempEmbed = createFluxerBrandEmbed(message)
           .setTitle('Account Sync Code')
           .setDescription(
-            `⚠️ **Could not DM you (DMs may be closed).**\n\n` +
+            `**Could not DM you (DMs may be closed).**\n\n` +
             `Your one-time link code is:\n\n` +
             `# \`${code}\`\n\n` +
             `Go to **Discord** within **${config.syncCodeExpirySec || 30} seconds** and send:\n` +

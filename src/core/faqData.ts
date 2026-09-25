@@ -37,7 +37,7 @@ export const FAQ_ENTRIES: readonly FaqEntry[] = [
       '• **Y** — Yuki',
       '• **S** — Sora',
       '',
-      '💡 **Tip**: If one provider buffers in your region, click the provider dropdown to switch. You can also toggle between **Default Player** and **ArtPlayer** in player settings.',
+      '**Tip**: If one provider buffers in your region, click the provider dropdown to switch. You can also toggle between **Default Player** and **ArtPlayer** in player settings.',
     ].join('\n'),
   },
   {
