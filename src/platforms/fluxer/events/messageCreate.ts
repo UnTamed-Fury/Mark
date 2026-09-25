@@ -46,8 +46,42 @@ export async function handleFluxerMessageCreate(message: Message): Promise<void>
     await sendFluxerEmbed(message, embed).catch(() => {});
   }
 
-  // 2. Notify if any mentioned users are AFK
+  // 2. Notify if any mentioned or replied-to users are AFK
   const targetsToCheck = new Set<string>();
+
+  // A. Check mentions array provided by Fluxer API
+  if (Array.isArray(message.mentions)) {
+    for (const u of message.mentions) {
+      if (u?.id && u.id !== message.author.id && !u.bot) {
+        targetsToCheck.add(u.id);
+      }
+    }
+  }
+
+  // B. Check direct referenced message author (reply)
+  if (message.referencedMessage?.author) {
+    const refAuthor = message.referencedMessage.author;
+    if (refAuthor.id !== message.author.id && !refAuthor.bot) {
+      targetsToCheck.add(refAuthor.id);
+    }
+  }
+
+  // C. Fallback: Check message reference snowflake if referencedMessage not hydrated
+  if (message.messageReference?.messageId && targetsToCheck.size === 0) {
+    try {
+      const ch = message.channel || (await message.resolveChannel().catch(() => null));
+      if (ch && typeof (ch as any).messages?.fetch === 'function') {
+        const refMsg = await (ch as any).messages.fetch(message.messageReference.messageId).catch(() => null);
+        if (refMsg?.author && refMsg.author.id !== message.author.id && !refMsg.author.bot) {
+          targetsToCheck.add(refMsg.author.id);
+        }
+      }
+    } catch {
+      // Ignored
+    }
+  }
+
+  // D. Regex fallback on text content
   const mentionRegex = /<@!?(\d+)>/g;
   let match: RegExpExecArray | null;
   while ((match = mentionRegex.exec(content)) !== null) {
@@ -65,7 +99,10 @@ export async function handleFluxerMessageCreate(message: Message): Promise<void>
       const embed = createFluxerBrandEmbed(message)
         .setTitle(`User is AFK`)
         .setDescription(`<@${targetId}> is currently AFK: **${afkEntry.reason}** (${relativeTime})`);
-      await sendFluxerEmbed(message, embed).catch(() => {});
+      await sendFluxerEmbed(message, embed).catch((err) => {
+        log.error(`Failed to send AFK notification in Fluxer channel ${message.channelId}:`, err);
+      });
+      log.info(`Dispatched AFK notification for ${targetId} on Fluxer in channel ${message.channelId}`);
     }
   }
 

@@ -207,14 +207,15 @@ export async function flushSystemLogs(): Promise<void> {
     const rawLogs = getLogsAfterId(lastFlushedLogId);
     if (rawLogs.length === 0) return;
 
-    lastFlushedLogId = rawLogs[rawLogs.length - 1]!.id;
-
     // Exclude PeriodicLogger logs to avoid feedback loops
     const recentLogs = rawLogs.filter((l) => l.context !== 'PeriodicLogger');
-    if (recentLogs.length === 0) return;
+    if (recentLogs.length === 0) {
+      lastFlushedLogId = rawLogs[rawLogs.length - 1]!.id;
+      return;
+    }
 
     const target = await resolveLogTarget(targetLogChannelId, 'log_channel_id');
-    if (!target) return;
+    if (!target) return; // Keep logs buffered until target channel resolves
 
     const hasError = recentLogs.some((l) => l.level === 'error');
     const hasWarn = recentLogs.some((l) => l.level === 'warn');
@@ -241,6 +242,7 @@ export async function flushSystemLogs(): Promise<void> {
 
     try {
       await target.sendBatches(embedPayloads);
+      lastFlushedLogId = rawLogs[rawLogs.length - 1]!.id;
     } catch (err) {
       log.error(`Failed to dispatch system logs to ${target.platform} channel ${target.channelId}:`, err);
     }

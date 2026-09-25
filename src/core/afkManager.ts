@@ -177,7 +177,7 @@ export function getAfk(
   }
 
   // 2. Check linked account global entry
-  const linkedId = platform === 'discord' ? getLinkedFluxerId(userId) : getLinkedDiscordId(userId);
+  const linkedId = getLinkedFluxerId(userId) || getLinkedDiscordId(userId);
   if (linkedId) {
     const linkedGlobal = afkStore.get(`global:${linkedId}`);
     if (linkedGlobal) {
@@ -209,10 +209,11 @@ export function clearAfk(
 
   const key = getStorageKey(entry.userId, entry.scope, entry.platform, entry.guildId);
   afkStore.delete(key);
+  afkStore.delete(`global:${userId}`);
 
   // If it was global, also clear linked account if present
   if (entry.scope === 'global') {
-    const linkedId = platform === 'discord' ? getLinkedFluxerId(userId) : getLinkedDiscordId(userId);
+    const linkedId = getLinkedFluxerId(userId) || getLinkedDiscordId(userId);
     if (linkedId) {
       afkStore.delete(`global:${linkedId}`);
     }

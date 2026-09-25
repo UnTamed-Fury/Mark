@@ -55,10 +55,33 @@ export async function handleDiscordMessageCreate(message: Message): Promise<void
       targetsToCheck.add(userId);
     }
   }
-  if (message.reference?.messageId && message.mentions.repliedUser) {
-    const replied = message.mentions.repliedUser;
-    if (replied.id !== message.author.id && !replied.bot) {
-      targetsToCheck.add(replied.id);
+
+  // Handle replies
+  if (message.reference?.messageId) {
+    if (message.mentions.repliedUser) {
+      const replied = message.mentions.repliedUser;
+      if (replied.id !== message.author.id && !replied.bot) {
+        targetsToCheck.add(replied.id);
+      }
+    } else {
+      try {
+        const refMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
+        if (refMsg?.author && refMsg.author.id !== message.author.id && !refMsg.author.bot) {
+          targetsToCheck.add(refMsg.author.id);
+        }
+      } catch {
+        // Ignored
+      }
+    }
+  }
+
+  // Regex fallback
+  const mentionRegex = /<@!?(\d+)>/g;
+  let match: RegExpExecArray | null;
+  while ((match = mentionRegex.exec(content)) !== null) {
+    const id = match[1];
+    if (id && id !== message.author.id) {
+      targetsToCheck.add(id);
     }
   }
 
@@ -73,7 +96,10 @@ export async function handleDiscordMessageCreate(message: Message): Promise<void
       const embed = createBrandEmbed(message)
         .setTitle(`${displayName} is AFK`)
         .setDescription(`<@${targetId}> is currently AFK: **${afkEntry.reason}** (${relativeTime})`);
-      await sendEmbed(message, embed).catch(() => {});
+      await sendEmbed(message, embed).catch((err) => {
+        log.error(`Failed to send AFK notification in Discord channel ${message.channelId}:`, err);
+      });
+      log.info(`Dispatched AFK notification for ${targetId} on Discord in channel ${message.channelId}`);
     }
   }
 

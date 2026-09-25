@@ -95,8 +95,30 @@ const afkCommand: DiscordCommand = {
   aliases: AFK_COMMAND_META.aliases,
   description: AFK_COMMAND_META.description,
   async execute(message: Message, args: string[]): Promise<void> {
-    const reason = args.join(' ').trim() || 'AFK';
     const serverName = message.guild?.name ?? 'this server';
+    const firstArg = args[0]?.toLowerCase();
+
+    // Direct CLI scope: +afk global [reason] or +afk server [reason]
+    if (firstArg === 'global' || firstArg === 'server') {
+      const scope: AfkScope = firstArg;
+      const reason = args.slice(1).join(' ').trim() || 'AFK';
+      const entry = setAfk(message.author.id, scope, 'discord', message.guildId, message.guild?.name, reason);
+      const relativeTime = getRelativeTimestamp(entry.timestamp);
+      const scopeLabel = scope === 'global' ? 'globally' : `in **${serverName}**`;
+
+      const successEmbed = createBrandEmbed(message)
+        .setTitle(`${message.author.displayName || message.author.username} is now AFK`)
+        .setDescription(
+          `You are now set as AFK ${scopeLabel}.\n\n` +
+          `• **Reason**: ${entry.reason}\n` +
+          `• **Started**: ${relativeTime}`
+        );
+      await sendEmbed(message, successEmbed);
+      log.info(`Direct AFK set for ${message.author.username} (${message.author.id}) [${scope}]: "${reason}"`);
+      return;
+    }
+
+    const reason = args.join(' ').trim() || 'AFK';
 
     const embed = createBrandEmbed(message)
       .setTitle('AFK Configuration')
@@ -169,14 +191,14 @@ const afkCommand: DiscordCommand = {
           `• **Started**: ${relativeTime}`
         );
 
+      log.info(`Button AFK set for ${message.author.username} (${message.author.id}) [${scope}]: "${reason}"`);
       try {
         await interaction.editReply({ embeds: [successEmbed], components: [] });
       } catch {
         await promptMsg.edit({ embeds: [successEmbed], components: [] }).catch(() => {});
       }
     } catch (err) {
-      log.debug('AFK interaction collector ended:', err);
-      // Timeout after 60s
+      log.error('AFK interaction collector ended with error or timeout:', err);
       await promptMsg.edit({ components: [] }).catch(() => {});
     }
   },

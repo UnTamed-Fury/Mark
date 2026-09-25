@@ -86,8 +86,30 @@ const afkCommand: FluxerCommand = {
   aliases: AFK_COMMAND_META.aliases,
   description: AFK_COMMAND_META.description,
   async execute(message: Message, args: string[]): Promise<void> {
-    const reason = args.join(' ').trim() || 'AFK';
     const serverName = 'this server';
+    const firstArg = args[0]?.toLowerCase();
+
+    // Direct CLI scope: +afk global [reason] or +afk server [reason]
+    if (firstArg === 'global' || firstArg === 'server') {
+      const scope: AfkScope = firstArg;
+      const reason = args.slice(1).join(' ').trim() || 'AFK';
+      const entry = setAfk(message.author.id, scope, 'fluxer', message.guildId, serverName, reason);
+      const relativeTime = getRelativeTimestamp(entry.timestamp, 'fluxer');
+      const scopeLabel = scope === 'global' ? 'globally' : `in **${serverName}**`;
+
+      const successEmbed = createFluxerBrandEmbed(message)
+        .setTitle(`${message.author.username} is now AFK`)
+        .setDescription(
+          `You are now set as AFK ${scopeLabel}.\n\n` +
+          `• **Reason**: ${entry.reason}\n` +
+          `• **Started**: ${relativeTime}`
+        );
+      await sendFluxerEmbed(message, successEmbed);
+      log.info(`Direct AFK set for ${message.author.username} (${message.author.id}) on Fluxer [${scope}]: "${reason}"`);
+      return;
+    }
+
+    const reason = args.join(' ').trim() || 'AFK';
 
     const embed = createFluxerBrandEmbed(message)
       .setTitle('AFK Configuration')
