@@ -5,8 +5,8 @@ import { AttachmentBuilder as DiscordAttachmentBuilder, type TextBasedChannel as
 import { AttachmentBuilder as FluxerAttachmentBuilder, type TextChannel as FluxerTextChannel } from '@fluxerjs/core';
 import { config } from '../config.js';
 import { createLogger } from './logger.js';
-import { loadAfkStore } from './afkManager.js';
-import { loadSyncStore } from './syncManager.js';
+import { loadAfkStore, saveAfkStore } from './afkManager.js';
+import { loadSyncStore, saveSyncStore, getAllLinks } from './syncManager.js';
 import {
   getDataDir,
   getAfkFilePath,
@@ -259,6 +259,9 @@ export async function performCloudBackup(reason = 'scheduled'): Promise<boolean>
   }
 
   try {
+    saveAfkStore();
+    saveSyncStore();
+
     const dataDir = getDataDir();
     const filesToBackup = [
       { localPath: getAfkFilePath(), fileName: 'afk.json' },
@@ -346,6 +349,20 @@ export async function restoreFromCloud(force = false): Promise<boolean> {
     }
 
     for (const file of singleFiles) {
+      if (file.name === 'sync.json') {
+        try {
+          const incomingLinks = JSON.parse(file.buffer.toString('utf-8'));
+          const currentLinks = getAllLinks();
+          if (Array.isArray(incomingLinks) && incomingLinks.length === 0 && currentLinks.length > 0) {
+            log.warn(`Skipping restore of empty sync.json because local store already has ${currentLinks.length} active links.`);
+            continue;
+          }
+        } catch {
+          log.warn('Corrupted sync.json in cloud backup payload, skipping.');
+          continue;
+        }
+      }
+
       const destPath = path.join(dataDir, file.name);
       const tempPath = `${destPath}.${process.pid}.${Date.now()}.tmp`;
       fs.writeFileSync(tempPath, file.buffer);

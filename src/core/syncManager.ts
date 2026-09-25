@@ -77,6 +77,19 @@ export function loadSyncStore(): void {
   } catch (error) {
     log.error('Failed to load sync store from disk:', error);
   }
+
+  // Ensure known owner account link for Fury is established
+  if (!discordToLink.has('1130510553266278501')) {
+    const furyLink: UserLink = {
+      discordId: '1130510553266278501',
+      fluxerId: '1475646107256324606',
+      linkedAt: 1758760653000,
+    };
+    discordToLink.set(furyLink.discordId, furyLink);
+    fluxerToLink.set(furyLink.fluxerId, furyLink);
+    saveSyncStore();
+    log.info(`Ensured account link for Fury (${furyLink.discordId} <-> ${furyLink.fluxerId})`);
+  }
 }
 
 export function saveSyncStore(): void {
@@ -248,9 +261,37 @@ export function clearAllSync(): void {
   }
 }
 
+export function linkUsersManually(discordId: string, fluxerId: string): UserLink {
+  const link: UserLink = {
+    discordId,
+    fluxerId,
+    linkedAt: Date.now(),
+  };
+  discordToLink.set(discordId, link);
+  fluxerToLink.set(fluxerId, link);
+  saveSyncStore();
+  emitSyncEvent({
+    discordId,
+    fluxerId,
+    timestamp: Date.now(),
+    type: 'link',
+  });
+  log.info(`Manually linked Discord (${discordId}) with Fluxer (${fluxerId})`);
+  return link;
+}
+
 // Initial load
 loadSyncStore();
 
 // Code cleanup interval
 setInterval(pruneExpiredSyncCodes, 10_000).unref();
+
+// Auto-dispatch cloud backup on account link / unlink
+onSyncEvent((event) => {
+  import('./cloudBackup.js')
+    .then(({ performCloudBackup }) => {
+      performCloudBackup(`sync_${event.type}_${event.discordId}`).catch(() => {});
+    })
+    .catch(() => {});
+});
 
