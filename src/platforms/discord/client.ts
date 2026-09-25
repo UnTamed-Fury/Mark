@@ -89,6 +89,10 @@ export function createDiscordClient(): Client {
       return;
     }
 
+    if (interaction.deferred || interaction.replied) {
+      return;
+    }
+
     await interaction.deferUpdate().catch(() => {});
 
     if (action === 'cancel') {

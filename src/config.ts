@@ -140,7 +140,10 @@ function parseConfig(): AppConfig {
   const envLocalConfig = loadEnvFile('.env.local');
   const localYaml = loadYamlFile('.config.mark.local');
 
-  const volumeYaml = loadYamlFile(path.join(activeDataDir, '.config.mark'));
+  const volumeYaml = {
+    ...loadYamlFile(path.join(activeDataDir, 'config.mark')),
+    ...loadYamlFile(path.join(activeDataDir, '.config.mark')),
+  };
   const rawEnvYaml = parseYamlString(process.env.MARK_CONFIG || process.env.CONFIG_MARK);
 
   const envConfig = loadEnvFile('.env');

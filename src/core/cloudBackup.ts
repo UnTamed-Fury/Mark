@@ -363,11 +363,21 @@ export async function restoreFromCloud(force = false): Promise<boolean> {
         }
       }
 
-      const destPath = path.join(dataDir, file.name);
+      const normalizedName =
+        file.name === 'config.mark' || file.name === '.config.mark' ? '.config.mark' : file.name;
+      const destPath = path.join(dataDir, normalizedName);
       const tempPath = `${destPath}.${process.pid}.${Date.now()}.tmp`;
       fs.writeFileSync(tempPath, file.buffer);
       fs.renameSync(tempPath, destPath);
-      log.info(`Restored ${file.name} (${file.buffer.length} bytes) to ${destPath}`);
+      log.info(`Restored ${normalizedName} (${file.buffer.length} bytes) to ${destPath}`);
+
+      if (normalizedName === '.config.mark') {
+        try {
+          fs.copyFileSync(destPath, path.join(dataDir, 'config.mark'));
+        } catch {
+          // Ignore copy error
+        }
+      }
     }
 
     loadAfkStore();
