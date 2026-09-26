@@ -423,32 +423,60 @@ describe('Tests2: V1 to V2 Migration, Stress, Memory Efficiency & Railway Config
   });
 
   // =========================================================================
-  // 4. RAILWAY CONFIGURATION & TEST ENVIRONMENT VALIDATION
+  // 4. RAILWAY INFRASTRUCTURE AS CODE (.railway/railway.ts) VALIDATION
   // =========================================================================
-  describe('Railway Production & Test Configuration Validation', () => {
-    it('validates railway.json production deployment specification', () => {
-      const railwayConfigPath = path.resolve(process.cwd(), 'railway.json');
-      expect(fs.existsSync(railwayConfigPath)).toBe(true);
-
-      const railwayConfig = JSON.parse(fs.readFileSync(railwayConfigPath, 'utf-8'));
-      expect(railwayConfig.build.builder).toBe('NIXPACKS');
-      expect(railwayConfig.build.buildCommand).toBe('pnpm build');
-      expect(railwayConfig.deploy.startCommand).toBe('pnpm start');
-      expect(railwayConfig.deploy.restartPolicyType).toBe('ON_FAILURE');
-      expect(railwayConfig.deploy.restartPolicyMaxRetries).toBe(10);
-      expect(railwayConfig.deploy.sleepApplication).toBe(true);
+  describe('Railway Pure TypeScript IaC (.railway/railway.ts) Validation', () => {
+    it('verifies that deprecated Config as Code (railway.json / railway.test.json) are removed', () => {
+      expect(fs.existsSync(path.resolve(process.cwd(), 'railway.json'))).toBe(false);
+      expect(fs.existsSync(path.resolve(process.cwd(), 'railway.test.json'))).toBe(false);
     });
 
-    it('validates railway.test.json test environment specification', () => {
-      const railwayTestPath = path.resolve(process.cwd(), 'railway.test.json');
-      expect(fs.existsSync(railwayTestPath)).toBe(true);
+    it('validates .railway/railway.ts structure, multi-repo partial, and preserved variables', () => {
+      const iacPath = path.resolve(process.cwd(), '.railway/railway.ts');
+      expect(fs.existsSync(iacPath)).toBe(true);
 
-      const testConfig = JSON.parse(fs.readFileSync(railwayTestPath, 'utf-8'));
-      expect(testConfig.build.builder).toBe('NIXPACKS');
-      expect(testConfig.build.buildCommand).toBe('pnpm build');
-      expect(testConfig.deploy.startCommand).toBe('pnpm test');
-      expect(testConfig.deploy.restartPolicyType).toBe('NEVER');
-      expect(testConfig.deploy.sleepApplication).toBe(false);
+      const iacContent = fs.readFileSync(iacPath, 'utf-8');
+      expect(iacContent).toContain('export const partial = "animex-mark-bot";');
+      expect(iacContent).toContain('service("animex-mark-bot"');
+      expect(iacContent).toContain('github("UnTamed-Fury/Mark")');
+      expect(iacContent).toContain('builder: "NIXPACKS"');
+      expect(iacContent).toContain('buildCommand: "pnpm build"');
+      expect(iacContent).toContain('watchPatterns:');
+      expect(iacContent).toContain('restartPolicyType:');
+      expect(iacContent).toContain('CLOUD_BACKUP_INTERVAL_MIN: preserve()');
+    });
+
+    it('evaluates .railway/railway.ts dynamically for production and test environments', async () => {
+      const iacModule = await import('../.railway/railway.js').catch(() => null);
+      // If ts file is loaded directly via tsx / vitest
+      const iacTsModule = await import('../.railway/railway.ts');
+
+      expect(iacTsModule.partial).toBe('animex-mark-bot');
+      expect(typeof iacTsModule.default).toBe('function');
+
+      // Test evaluation in mock production context
+      const prodContext: any = {
+        isEnvironment: (name: string) => name === 'production',
+        environment: 'production',
+      };
+      const prodProject = iacTsModule.default(prodContext);
+      expect(prodProject).toBeDefined();
+      const prodService = (prodProject.resources as any[])[0];
+      expect(prodService.deploy.startCommand).toBe('pnpm start');
+      expect(prodService.deploy.restartPolicyType).toBe('ON_FAILURE');
+      expect(prodService.deploy.sleepApplication).toBe(true);
+
+      // Test evaluation in mock test context
+      const testContext: any = {
+        isEnvironment: (name: string) => name === 'test',
+        environment: 'test',
+      };
+      const testProject = iacTsModule.default(testContext);
+      expect(testProject).toBeDefined();
+      const testService = (testProject.resources as any[])[0];
+      expect(testService.deploy.startCommand).toBe('pnpm test');
+      expect(testService.deploy.restartPolicyType).toBe('NEVER');
+      expect(testService.deploy.sleepApplication).toBe(false);
     });
 
     it('validates package.json start command enforces 128MB memory ceiling for Railway', () => {
@@ -458,20 +486,6 @@ describe('Tests2: V1 to V2 Migration, Stress, Memory Efficiency & Railway Config
       expect(pkg.scripts.start).toContain('--max-old-space-size=128');
       expect(pkg.scripts['migrate:v2']).toBe('tsx scripts/migrate-to-v2.ts');
       expect(pkg.scripts['test:stress']).toBe('vitest run tests/tests2.test.ts');
-    });
-
-    it('validates .railway/railway.ts IaC configuration structure and preserved secrets', () => {
-      const iacPath = path.resolve(process.cwd(), '.railway/railway.ts');
-      expect(fs.existsSync(iacPath)).toBe(true);
-
-      const iacContent = fs.readFileSync(iacPath, 'utf-8');
-      expect(iacContent).toContain('service("animex-mark-bot"');
-      expect(iacContent).toContain('github("UnTamed-Fury/Mark")');
-      expect(iacContent).toContain('buildCommand: "pnpm build"');
-      expect(iacContent).toContain('startCommand: "pnpm start"');
-      expect(iacContent).toContain('DISCORD_BOT_TOKEN');
-      expect(iacContent).toContain('FLUXER_BOT_TOKEN');
-      expect(iacContent).toContain('CLOUD_BACKUP_ENABLED');
     });
   });
 });
