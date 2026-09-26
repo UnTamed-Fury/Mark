@@ -60,15 +60,44 @@ function emitSyncEvent(event: SyncEvent): void {
   }
 }
 
+export interface SyncStoreDocumentV2 {
+  readonly version: string;
+  readonly updatedAt: string;
+  readonly stats: {
+    readonly totalLinked: number;
+  };
+  readonly links: Array<{
+    readonly discordId: string;
+    readonly fluxerId: string;
+    readonly linkedAt: number;
+    readonly linkedAtIso: string;
+  }>;
+}
+
 export function loadSyncStore(): void {
   try {
     const filePath = getSyncFilePath();
     if (fs.existsSync(filePath)) {
       const data = fs.readFileSync(filePath, 'utf-8');
-      const parsed: UserLink[] = JSON.parse(data);
+      const parsed = JSON.parse(data);
+      let rawLinks: any[] = [];
+      if (Array.isArray(parsed)) {
+        // v1 legacy array
+        rawLinks = parsed;
+      } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.links)) {
+        // v2 structured document
+        rawLinks = parsed.links;
+      }
+
       discordToLink.clear();
       fluxerToLink.clear();
-      for (const link of parsed) {
+      for (const item of rawLinks) {
+        if (!item || !item.discordId || !item.fluxerId) continue;
+        const link: UserLink = {
+          discordId: String(item.discordId),
+          fluxerId: String(item.fluxerId),
+          linkedAt: Number(item.linkedAt) || Date.now(),
+        };
         discordToLink.set(link.discordId, link);
         fluxerToLink.set(link.fluxerId, link);
       }
@@ -99,9 +128,24 @@ export function saveSyncStore(): void {
       fs.mkdirSync(dataDir, { recursive: true });
     }
     const filePath = getSyncFilePath();
-    const list = Array.from(discordToLink.values());
+    const linksList = Array.from(discordToLink.values()).map((link) => ({
+      discordId: link.discordId,
+      fluxerId: link.fluxerId,
+      linkedAt: link.linkedAt,
+      linkedAtIso: new Date(link.linkedAt).toISOString(),
+    }));
+
+    const document: SyncStoreDocumentV2 = {
+      version: '2.0.0',
+      updatedAt: new Date().toISOString(),
+      stats: {
+        totalLinked: linksList.length,
+      },
+      links: linksList,
+    };
+
     const tempFile = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(list, null, 2), 'utf-8');
+    fs.writeFileSync(tempFile, JSON.stringify(document, null, 2), 'utf-8');
     fs.renameSync(tempFile, filePath);
   } catch (error) {
     log.error('Failed to save sync store to disk:', error);

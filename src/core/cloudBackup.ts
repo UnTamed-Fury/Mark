@@ -359,9 +359,13 @@ export async function restoreFromCloud(force = false): Promise<boolean> {
     for (const file of singleFiles) {
       if (file.name === 'sync.json') {
         try {
-          const incomingLinks = JSON.parse(file.buffer.toString('utf-8'));
+          const parsed = JSON.parse(file.buffer.toString('utf-8'));
           const currentLinks = getAllLinks();
-          if (Array.isArray(incomingLinks) && incomingLinks.length === 0 && currentLinks.length > 0) {
+          const incomingLinks = Array.isArray(parsed)
+            ? parsed
+            : (parsed && typeof parsed === 'object' && Array.isArray(parsed.links) ? parsed.links : null);
+
+          if (incomingLinks !== null && incomingLinks.length === 0 && currentLinks.length > 0) {
             log.warn(`Skipping restore of empty sync.json because local store already has ${currentLinks.length} active links.`);
             continue;
           }
