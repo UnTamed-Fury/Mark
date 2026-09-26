@@ -129,4 +129,32 @@ describe('Fluxer Commands Registry and Executors', () => {
     expect(detailReplies).toHaveLength(1);
     expect(detailReplies[0].embeds![0].data.title).toContain('Help • +website');
   });
+
+  it('supports direct CLI afk scope (+afk global [reason])', async () => {
+    const { message, replies } = createMockFluxerMessage('+afk global Studying for exams', 'afk-cli-user');
+    const cmd = getFluxerCommand('afk');
+    await cmd!.execute(message, ['global', 'Studying', 'for', 'exams']);
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0].embeds![0].data.title).toContain('TestUser is now AFK');
+    expect(replies[0].embeds![0].data.description).toContain('Studying for exams');
+  });
+
+  it('rejects unprivileged users from running backup command', async () => {
+    const { message, replies } = createMockFluxerMessage('+backup', 'random-user-id');
+    const cmd = getFluxerCommand('backup');
+    await cmd!.execute(message, []);
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0].embeds![0].data.title).toContain('Permission Denied');
+  });
+
+  it('allows owner to run backup status command', async () => {
+    const { message, replies } = createMockFluxerMessage('+backup', '1475646107256324606');
+    const cmd = getFluxerCommand('backup');
+    await cmd!.execute(message, []);
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0].embeds![0].data.title).toContain('Disaster Recovery');
+  });
 });

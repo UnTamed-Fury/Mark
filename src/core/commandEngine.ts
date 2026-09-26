@@ -16,8 +16,10 @@ import {
   PING_COMMAND_META,
   calculatePingDetails,
   UPTIME_COMMAND_META,
+  BACKUP_COMMAND_META,
 } from './commandsData.js';
 import { formatDuration } from './afkManager.js';
+import { getBackupStatus } from './cloudBackup.js';
 
 export interface CommandEmbedPayload {
   readonly title: string;
@@ -239,6 +241,50 @@ export const STANDARD_COMMANDS: readonly StandardCommandDef[] = [
           { name: 'Memory', value: `\`${heapMB} MB / ${rssMB} MB\``, inline: true },
           { name: 'Status', value: '`Healthy`', inline: true },
           { name: 'Runtime', value: `\`Node ${process.version}\``, inline: true },
+        ],
+      };
+    },
+  },
+  {
+    name: BACKUP_COMMAND_META.name,
+    aliases: BACKUP_COMMAND_META.aliases,
+    description: BACKUP_COMMAND_META.description,
+    getPayload: (ctx) => {
+      const status = getBackupStatus();
+      const isFluxer = ctx.platform === 'fluxer';
+      const lastBackupStr = status.lastBackupTime
+        ? isFluxer
+          ? `${formatDuration(Date.now() - status.lastBackupTime)} ago (${status.lastBackupReason || 'auto'})`
+          : `<t:${Math.floor(status.lastBackupTime / 1000)}:R> (${status.lastBackupReason || 'auto'})`
+        : 'Never';
+      const lastRestoreStr = status.lastRestoreTime
+        ? isFluxer
+          ? `${formatDuration(Date.now() - status.lastRestoreTime)} ago`
+          : `<t:${Math.floor(status.lastRestoreTime / 1000)}:R>`
+        : 'Never';
+
+      const fileLines = status.files.map((f) => {
+        const statusIcon = f.exists ? '✓' : '✗';
+        const sizeStr = f.exists ? `${(f.sizeBytes / 1024).toFixed(1)} KB` : 'Missing';
+        return `• \`${f.name}\`: ${statusIcon} ${sizeStr}`;
+      });
+
+      const channelDisplay = status.channelId
+        ? `<#${status.channelId}>`
+        : 'Not Configured';
+
+      return {
+        title: 'AnimeX Bot • Cloud Backup & Disaster Recovery',
+        description:
+          `Automated cloud backup and state replication across Discord & Fluxer.\n\n` +
+          `**Tracked State Files**:\n${fileLines.join('\n')}`,
+        fields: [
+          { name: 'Backup Status', value: status.enabled ? '`Active`' : '`Disabled`', inline: true },
+          { name: 'Target Channel', value: channelDisplay, inline: true },
+          { name: 'Interval', value: `\`${status.intervalMin} minutes\``, inline: true },
+          { name: 'Auto Restore', value: status.autoRestore ? '`Enabled`' : '`Disabled`', inline: true },
+          { name: 'Last Backup', value: lastBackupStr, inline: true },
+          { name: 'Last Restore', value: lastRestoreStr, inline: true },
         ],
       };
     },

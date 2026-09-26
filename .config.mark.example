@@ -19,7 +19,7 @@ servers:
   # Optional developer test server ID for testing commands in isolation
   test_server_id: ""
   # Dedicated logging server (if separate from main community servers)
-  log_server_id: ""
+  log_server_id: "1256614479836221532"
   # Custom Fluxer instance API URL (leave empty to use default discovery)
   fluxer_api_url: ""
 
@@ -31,11 +31,11 @@ channels:
   # Support ticket channel (referenced in +ticket embed)
   ticket_channel_id: "1320161905695789095"
   # Main system log channel for streaming error and warning logs
-  log_channel_id: ""
-  # Dedicated channel for 5-minute AFK activity summaries (falls back to log_channel_id if empty)
-  afk_log_channel_id: ""
+  log_channel_id: "1551646162338189403"
+  # Dedicated channel for AFK activity summaries (falls back to log_channel_id if empty)
+  afk_log_channel_id: "1551646193128571001"
   # Dedicated channel for account sync summaries (falls back to log_channel_id if empty)
-  sync_log_channel_id: ""
+  sync_log_channel_id: "1551646227924394004"
 
 # Timers and Intervals
 # Configures how often background workers, flushes, and expiration tasks execute.
@@ -83,15 +83,15 @@ sister_sites:
 # If files exceed the max part size, they are automatically chunked into numbered parts and reassembled on restore.
 cloud_backup:
   # Set to true to activate automated cloud backups and disaster recovery
-  enabled: false
+  enabled: true
   # Platform hosting the backup channel ("discord" or "fluxer")
   platform: "discord"
   # Server (Guild) ID where the backup channel is located
-  server_id: ""
+  server_id: "1256614479836221532"
   # Private text channel ID designated exclusively for backup file uploads
-  channel_id: ""
-  # Interval in minutes between periodic cloud backups (default: 60)
-  backup_interval_min: 60
+  channel_id: "1552751072689262723"
+  # Interval in minutes between periodic cloud backups (default: 5)
+  backup_interval_min: 5
   # Automatically pull and restore the latest snapshot on bot boot (default: true)
   auto_restore_on_boot: true
   # Maximum file part size in MB before chunking (Discord free tier limit is 8MB-10MB, default: 8)

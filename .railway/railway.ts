@@ -1,26 +1,44 @@
-import { defineRailway, project, service, volume } from "railway/iac";
+import { defineRailway, github, preserve, project, service } from "railway/iac";
 
-export default defineRailway(() => {
-  const data = volume("mark-data", {
-    sizeMB: 500,
-  });
+// This repository manages only its own resources in the environment.
+export const partial = "animex-mark-bot";
 
-  const bot = service("Mark", {
+export default defineRailway((ctx) => {
+  const isTest = ctx?.isEnvironment?.("test") || ctx?.environment === "test";
+
+  const animex_mark_bot = service("animex-mark-bot", {
+    source: github("UnTamed-Fury/Mark"),
     build: {
-      builder: "RAILPACK",
+      builder: "NIXPACKS",
       buildCommand: "pnpm build",
+      watchPatterns: isTest
+        ? ["src/**", "tests/**", "package.json", "pnpm-lock.yaml", "tsconfig.json"]
+        : ["src/**", "package.json", "pnpm-lock.yaml", "tsconfig.json"],
     },
     deploy: {
-      startCommand: "pnpm start",
-      restartPolicyType: "ON_FAILURE",
-      restartPolicyMaxRetries: 10,
+      startCommand: isTest ? "pnpm test" : "pnpm start",
+      restartPolicyType: isTest ? "NEVER" : "ON_FAILURE",
+      restartPolicyMaxRetries: isTest ? 0 : 10,
+      sleepApplication: !isTest,
     },
-    volumeMounts: {
-      "/data": data,
+    variables: {
+      DISCORD_BOT_TOKEN: preserve(),
+      FLUXER_BOT_TOKEN: preserve(),
+      PREFIX: preserve(),
+      LOG_CHANNEL_ID: preserve(),
+      AFK_LOG_CHANNEL_ID: preserve(),
+      SYNC_LOG_CHANNEL_ID: preserve(),
+      LOG_SERVER_ID: preserve(),
+      DISCORD_SERVER_ID: preserve(),
+      FLUXER_SERVER_ID: preserve(),
+      CLOUD_BACKUP_ENABLED: preserve(),
+      CLOUD_BACKUP_INTERVAL_MIN: preserve(),
+      CLOUD_BACKUP_CHANNEL_ID: preserve(),
+      CLOUD_BACKUP_SERVER_ID: preserve(),
     },
   });
 
-  return project("Mark", {
-    resources: [bot, data],
+  return project("Fury", {
+    resources: [animex_mark_bot],
   });
 });

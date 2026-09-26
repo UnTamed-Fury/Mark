@@ -41,22 +41,91 @@ const pendingCodes = new Map<string, PendingSyncCode>();
 // Recent sync events (for 5-min batch logs)
 const recentSyncEvents: SyncEvent[] = [];
 
+export type SyncEventListener = (event: SyncEvent) => void;
+const syncEventListeners = new Set<SyncEventListener>();
+
+export function onSyncEvent(listener: SyncEventListener): () => void {
+  syncEventListeners.add(listener);
+  return () => syncEventListeners.delete(listener);
+}
+
+function emitSyncEvent(event: SyncEvent): void {
+  recentSyncEvents.push(event);
+  for (const listener of syncEventListeners) {
+    try {
+      listener(event);
+    } catch (err) {
+      log.error('Error in sync event listener:', err);
+    }
+  }
+}
+
+export interface SyncStoreDocumentV2 {
+  readonly version: string;
+  readonly updatedAt: string;
+  readonly stats: {
+    readonly totalLinked: number;
+  };
+  readonly links: Array<{
+    readonly discordId: string;
+    readonly fluxerId: string;
+    readonly linkedAt: number;
+    readonly linkedAtIso: string;
+  }>;
+}
+
 export function loadSyncStore(): void {
   try {
     const filePath = getSyncFilePath();
     if (fs.existsSync(filePath)) {
       const data = fs.readFileSync(filePath, 'utf-8');
-      const parsed: UserLink[] = JSON.parse(data);
+      const parsed = JSON.parse(data);
+      let isLegacyV1 = false;
+      let rawLinks: any[] = [];
+      if (Array.isArray(parsed)) {
+        // v1 legacy array
+        isLegacyV1 = true;
+        rawLinks = parsed;
+      } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.links)) {
+        // v2 structured document
+        rawLinks = parsed.links;
+      }
+
       discordToLink.clear();
       fluxerToLink.clear();
-      for (const link of parsed) {
+      for (const item of rawLinks) {
+        if (!item || !item.discordId || !item.fluxerId) continue;
+        const link: UserLink = {
+          discordId: String(item.discordId),
+          fluxerId: String(item.fluxerId),
+          linkedAt: Number(item.linkedAt) || Date.now(),
+        };
         discordToLink.set(link.discordId, link);
         fluxerToLink.set(link.fluxerId, link);
       }
       log.info(`Loaded ${discordToLink.size} account links from disk`);
+
+      if (isLegacyV1) {
+        log.info(`Auto-migrating legacy v1 sync.json to v2 format (${discordToLink.size} links)...`);
+        saveSyncStore();
+        log.info('Successfully auto-migrated sync.json to v2 format on disk');
+      }
     }
   } catch (error) {
     log.error('Failed to load sync store from disk:', error);
+  }
+
+  // Ensure known owner account link for Fury is established
+  if (!discordToLink.has('1130510553266278501')) {
+    const furyLink: UserLink = {
+      discordId: '1130510553266278501',
+      fluxerId: '1475646107256324606',
+      linkedAt: 1758760653000,
+    };
+    discordToLink.set(furyLink.discordId, furyLink);
+    fluxerToLink.set(furyLink.fluxerId, furyLink);
+    saveSyncStore();
+    log.info(`Ensured account link for Fury (${furyLink.discordId} <-> ${furyLink.fluxerId})`);
   }
 }
 
@@ -67,9 +136,24 @@ export function saveSyncStore(): void {
       fs.mkdirSync(dataDir, { recursive: true });
     }
     const filePath = getSyncFilePath();
-    const list = Array.from(discordToLink.values());
+    const linksList = Array.from(discordToLink.values()).map((link) => ({
+      discordId: link.discordId,
+      fluxerId: link.fluxerId,
+      linkedAt: link.linkedAt,
+      linkedAtIso: new Date(link.linkedAt).toISOString(),
+    }));
+
+    const document: SyncStoreDocumentV2 = {
+      version: '2.0.0',
+      updatedAt: new Date().toISOString(),
+      stats: {
+        totalLinked: linksList.length,
+      },
+      links: linksList,
+    };
+
     const tempFile = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(list, null, 2), 'utf-8');
+    fs.writeFileSync(tempFile, JSON.stringify(document, null, 2), 'utf-8');
     fs.renameSync(tempFile, filePath);
   } catch (error) {
     log.error('Failed to save sync store to disk:', error);
@@ -158,7 +242,7 @@ export function claimSyncCode(
   fluxerToLink.set(fluxerId, link);
   pendingCodes.delete(cleanCode);
 
-  recentSyncEvents.push({
+  emitSyncEvent({
     discordId,
     fluxerId,
     timestamp: Date.now(),
@@ -194,7 +278,7 @@ export function unlinkUser(userId: string, platform: 'discord' | 'fluxer'): bool
   discordToLink.delete(link.discordId);
   fluxerToLink.delete(link.fluxerId);
 
-  recentSyncEvents.push({
+  emitSyncEvent({
     discordId: link.discordId,
     fluxerId: link.fluxerId,
     timestamp: Date.now(),
@@ -229,9 +313,80 @@ export function clearAllSync(): void {
   }
 }
 
+export function linkUsersManually(discordId: string, fluxerId: string): UserLink {
+  const link: UserLink = {
+    discordId,
+    fluxerId,
+    linkedAt: Date.now(),
+  };
+  discordToLink.set(discordId, link);
+  fluxerToLink.set(fluxerId, link);
+  saveSyncStore();
+  emitSyncEvent({
+    discordId,
+    fluxerId,
+    timestamp: Date.now(),
+    type: 'link',
+  });
+  log.info(`Manually linked Discord (${discordId}) with Fluxer (${fluxerId})`);
+  return link;
+}
+
+export interface MigrationResult {
+  migrated: boolean;
+  totalRecords: number;
+  backupPath?: string;
+}
+
+export function migrateSyncStoreToV2(options: { backup?: boolean; filePath?: string } = {}): MigrationResult {
+  const filePath = options.filePath || getSyncFilePath();
+  if (!fs.existsSync(filePath)) {
+    return { migrated: false, totalRecords: 0 };
+  }
+
+  const rawData = fs.readFileSync(filePath, 'utf-8');
+  let parsed: any;
+  try {
+    parsed = JSON.parse(rawData);
+  } catch {
+    return { migrated: false, totalRecords: 0 };
+  }
+
+  const isV1Array = Array.isArray(parsed);
+  const isV2 = parsed && typeof parsed === 'object' && parsed.version === '2.0.0' && Array.isArray(parsed.links);
+
+  if (!isV1Array && isV2) {
+    return { migrated: false, totalRecords: parsed.links.length };
+  }
+
+  let backupPath: string | undefined;
+  if (options.backup !== false) {
+    backupPath = `${filePath}.v1.bak.${Date.now()}`;
+    fs.writeFileSync(backupPath, rawData, 'utf-8');
+  }
+
+  loadSyncStore();
+  saveSyncStore();
+
+  return {
+    migrated: true,
+    totalRecords: discordToLink.size,
+    backupPath,
+  };
+}
+
 // Initial load
 loadSyncStore();
 
 // Code cleanup interval
 setInterval(pruneExpiredSyncCodes, 10_000).unref();
+
+// Auto-dispatch cloud backup on account link / unlink
+onSyncEvent((event) => {
+  import('./cloudBackup.js')
+    .then(({ performCloudBackup }) => {
+      performCloudBackup(`sync_${event.type}_${event.discordId}`).catch(() => {});
+    })
+    .catch(() => {});
+});
 

@@ -8,7 +8,7 @@ import {
   getConfigMarkFilePath,
   ensureDataDirSetup,
 } from '../src/core/dataDir.js';
-import { chunkBuffer } from '../src/core/cloudBackup.js';
+import { chunkBuffer, getBackupStatus } from '../src/core/cloudBackup.js';
 
 describe('Data Directory & Persistence', () => {
   it('resolves a valid, accessible data directory', () => {
@@ -83,5 +83,18 @@ describe('Cloud Backup Chunking & Multipart Handling', () => {
     const syncFile = singleFiles.find((f) => f.name === 'sync.json');
     expect(syncFile).toBeDefined();
     expect(syncFile?.buffer.toString('utf-8')).toBe('{"test": true}');
+  });
+
+  it('exposes accurate telemetry status with getBackupStatus', () => {
+    const status = getBackupStatus();
+    expect(typeof status.enabled).toBe('boolean');
+    expect(['discord', 'fluxer']).toContain(status.platform);
+    expect(typeof status.intervalMin).toBe('number');
+    expect(Array.isArray(status.files)).toBe(true);
+    expect(status.files.length).toBeGreaterThanOrEqual(3);
+    const names = status.files.map((f) => f.name);
+    expect(names).toContain('afk.json');
+    expect(names).toContain('sync.json');
+    expect(names).toContain('.config.mark');
   });
 });

@@ -6,12 +6,15 @@ import {
   ButtonStyle,
   ComponentType,
   type ButtonInteraction,
+  MessageFlags,
+  PermissionFlagsBits,
 } from 'discord.js';
 import { config } from '../../config.js';
 import { BRAND } from '../../constants.js';
 import {
   AFK_COMMAND_META,
   SYNC_COMMAND_META,
+  BACKUP_COMMAND_META,
 } from '../../core/commandsData.js';
 import {
   STANDARD_COMMANDS,
@@ -20,6 +23,7 @@ import {
 } from '../../core/commandEngine.js';
 import { setAfk, getRelativeTimestamp, type AfkScope } from '../../core/afkManager.js';
 import { createSyncCode, claimSyncCode, getLinkedFluxerId, unlinkUser } from '../../core/syncManager.js';
+import { performCloudBackup, restoreFromCloud } from '../../core/cloudBackup.js';
 import { createLogger } from '../../core/logger.js';
 import { createBrandEmbed, sendEmbed } from './embeds.js';
 import { getFluxerClient } from '../fluxer/client.js';
@@ -65,7 +69,9 @@ function adaptStandardDiscordCommand(cmd: StandardCommandDef): DiscordCommand {
   };
 }
 
-const standardDiscordCommands: DiscordCommand[] = STANDARD_COMMANDS.map(adaptStandardDiscordCommand);
+const standardDiscordCommands: DiscordCommand[] = STANDARD_COMMANDS
+  .filter((cmd) => cmd.name !== BACKUP_COMMAND_META.name)
+  .map(adaptStandardDiscordCommand);
 
 const helpCommand: DiscordCommand = {
   name: 'help',
@@ -90,8 +96,30 @@ const afkCommand: DiscordCommand = {
   aliases: AFK_COMMAND_META.aliases,
   description: AFK_COMMAND_META.description,
   async execute(message: Message, args: string[]): Promise<void> {
-    const reason = args.join(' ').trim() || 'AFK';
     const serverName = message.guild?.name ?? 'this server';
+    const firstArg = args[0]?.toLowerCase();
+
+    // Direct CLI scope: +afk global [reason] or +afk server [reason]
+    if (firstArg === 'global' || firstArg === 'server') {
+      const scope: AfkScope = firstArg;
+      const reason = args.slice(1).join(' ').trim() || 'AFK';
+      const entry = setAfk(message.author.id, scope, 'discord', message.guildId, message.guild?.name, reason);
+      const relativeTime = getRelativeTimestamp(entry.timestamp);
+      const scopeLabel = scope === 'global' ? 'globally' : `in **${serverName}**`;
+
+      const successEmbed = createBrandEmbed(message)
+        .setTitle(`${message.author.displayName || message.author.username} is now AFK`)
+        .setDescription(
+          `You are now set as AFK ${scopeLabel}.\n\n` +
+          `• **Reason**: ${entry.reason}\n` +
+          `• **Started**: ${relativeTime}`
+        );
+      await sendEmbed(message, successEmbed);
+      log.info(`Direct AFK set for ${message.author.username} (${message.author.id}) [${scope}]: "${reason}"`);
+      return;
+    }
+
+    const reason = args.join(' ').trim() || 'AFK';
 
     const embed = createBrandEmbed(message)
       .setTitle('AFK Configuration')
@@ -127,7 +155,7 @@ const afkCommand: DiscordCommand = {
       const interaction = await promptMsg.awaitMessageComponent({
         filter: (i: ButtonInteraction) => {
           if (i.user.id !== message.author.id) {
-            i.reply({ content: 'This AFK prompt is not for you.', ephemeral: true }).catch(() => {});
+            i.reply({ content: 'This AFK prompt is not for you.', flags: MessageFlags.Ephemeral }).catch(() => {});
             return false;
           }
           return i.customId.startsWith('afk_');
@@ -136,11 +164,18 @@ const afkCommand: DiscordCommand = {
         time: 60_000,
       });
 
+      // Immediately acknowledge interaction within 3s window to prevent interaction failure
+      await interaction.deferUpdate().catch(() => {});
+
       if (interaction.customId.startsWith('afk_cancel_')) {
         const cancelEmbed = createBrandEmbed(message)
           .setTitle('AFK Cancelled')
           .setDescription('AFK setup was cancelled.');
-        await interaction.update({ embeds: [cancelEmbed], components: [] });
+        try {
+          await interaction.editReply({ embeds: [cancelEmbed], components: [] });
+        } catch {
+          await promptMsg.edit({ embeds: [cancelEmbed], components: [] }).catch(() => {});
+        }
         return;
       }
 
@@ -157,9 +192,14 @@ const afkCommand: DiscordCommand = {
           `• **Started**: ${relativeTime}`
         );
 
-      await interaction.update({ embeds: [successEmbed], components: [] });
-    } catch {
-      // Timeout after 60s
+      log.info(`Button AFK set for ${message.author.username} (${message.author.id}) [${scope}]: "${reason}"`);
+      try {
+        await interaction.editReply({ embeds: [successEmbed], components: [] });
+      } catch {
+        await promptMsg.edit({ embeds: [successEmbed], components: [] }).catch(() => {});
+      }
+    } catch (err) {
+      log.error('AFK interaction collector ended with error or timeout:', err);
       await promptMsg.edit({ components: [] }).catch(() => {});
     }
   },
@@ -256,7 +296,7 @@ const syncCommand: DiscordCommand = {
             if (btnInteraction.user.id !== message.author.id) {
               await btnInteraction.reply({
                 content: 'This sync code prompt belongs to another user.',
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
               });
               return;
             }
@@ -268,7 +308,7 @@ const syncCommand: DiscordCommand = {
                 `Switch to **Fluxer** within **${config.syncCodeExpirySec || 30} seconds** and send:\n` +
                 `\`${config.prefix}sync ${code}\`\n\n` +
                 `*(Only you can see this message)*`,
-              ephemeral: true,
+              flags: MessageFlags.Ephemeral,
             });
           } catch {
             // Best-effort response for already acknowledged or expired interactions
@@ -358,10 +398,96 @@ const syncCommand: DiscordCommand = {
   },
 };
 
+const backupCommand: DiscordCommand = {
+  name: BACKUP_COMMAND_META.name,
+  aliases: BACKUP_COMMAND_META.aliases,
+  description: BACKUP_COMMAND_META.description,
+  async execute(message: Message, args: string[]): Promise<void> {
+    const sub = (args[0] ?? '').toLowerCase();
+    const authorId = message.author.id;
+    const linkedFluxerId = getLinkedFluxerId(authorId);
+    const isDevOrOwner =
+      authorId === '1130510553266278501' || // Fury Discord ID
+      authorId === '1344082654852550788' || // Config Owner ID
+      (!!config.ownerId && authorId === config.ownerId) ||
+      linkedFluxerId === '1475646107256324606' ||
+      (!!config.ownerId && linkedFluxerId === config.ownerId);
+
+    const isServerAdmin =
+      Boolean(message.guild && message.guild.ownerId === authorId) ||
+      Boolean(
+        message.member?.permissions &&
+        typeof message.member.permissions.has === 'function' &&
+        message.member.permissions.has(PermissionFlagsBits.Administrator)
+      );
+
+    if (!isDevOrOwner && !isServerAdmin) {
+      const embed = createBrandEmbed(message)
+        .setTitle('Permission Denied')
+        .setDescription(
+          'You do not have permission to view or manage backups.\n' +
+          'This command requires server **Administrator** permissions or Bot Developer/Owner access.'
+        );
+      await sendEmbed(message, embed);
+      return;
+    }
+
+    if (sub === 'now' || sub === 'snapshot') {
+
+      const pendingEmbed = createBrandEmbed(message)
+        .setTitle('Cloud Backup In Progress')
+        .setDescription('Creating snapshot of persistent data and dispatching to cloud backup channel...');
+      const msg = await sendEmbed(message, pendingEmbed);
+
+      const success = await performCloudBackup(`manual_by_${message.author.username}`);
+      const resultEmbed = createBrandEmbed(message)
+        .setTitle(success ? 'Cloud Backup Successful' : 'Cloud Backup Failed')
+        .setDescription(
+          success
+            ? 'State snapshot was successfully created, chunked, and dispatched to the cloud backup channel.'
+            : 'Failed to dispatch cloud backup. Please check logs and channel permissions.'
+        );
+      await msg.edit({ embeds: [resultEmbed] }).catch(() => sendEmbed(message, resultEmbed));
+      return;
+    }
+
+    if (sub === 'restore') {
+      const pendingEmbed = createBrandEmbed(message)
+        .setTitle('Disaster Recovery In Progress')
+        .setDescription('Fetching latest cloud backup snapshot and restoring state...');
+      const msg = await sendEmbed(message, pendingEmbed);
+
+      const success = await restoreFromCloud(true);
+      const resultEmbed = createBrandEmbed(message)
+        .setTitle(success ? 'Cloud Restore Successful' : 'Cloud Restore Failed')
+        .setDescription(
+          success
+            ? 'Persistent data successfully restored from cloud backup. In-memory stores have been reloaded.'
+            : 'Failed to restore state from cloud backup. Please check logs and channel permissions.'
+        );
+      await msg.edit({ embeds: [resultEmbed] }).catch(() => sendEmbed(message, resultEmbed));
+      return;
+    }
+
+    const standardDef = STANDARD_COMMANDS.find((c) => c.name === BACKUP_COMMAND_META.name);
+    if (standardDef) {
+      const payload = standardDef.getPayload({ platform: 'discord', args });
+      const embed = createBrandEmbed(message)
+        .setTitle(payload.title)
+        .setDescription(payload.description);
+      if (payload.fields) {
+        embed.addFields(payload.fields.map((f) => ({ name: f.name, value: f.value, inline: f.inline })));
+      }
+      await sendEmbed(message, embed);
+    }
+  },
+};
+
 export const COMMANDS: readonly DiscordCommand[] = [
   ...standardDiscordCommands,
   afkCommand,
   syncCommand,
+  backupCommand,
   helpCommand,
 ];
 

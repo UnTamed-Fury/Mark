@@ -1,9 +1,10 @@
-import { type Message } from '@fluxerjs/core';
+import { type Message, PermissionFlags } from '@fluxerjs/core';
 import { config } from '../../config.js';
 import { BRAND } from '../../constants.js';
 import {
   AFK_COMMAND_META,
   SYNC_COMMAND_META,
+  BACKUP_COMMAND_META,
 } from '../../core/commandsData.js';
 import {
   STANDARD_COMMANDS,
@@ -12,6 +13,7 @@ import {
 } from '../../core/commandEngine.js';
 import { setAfk, getRelativeTimestamp, type AfkScope } from '../../core/afkManager.js';
 import { createSyncCode, claimSyncCode, getLinkedDiscordId, unlinkUser } from '../../core/syncManager.js';
+import { performCloudBackup, restoreFromCloud } from '../../core/cloudBackup.js';
 import { createLogger } from '../../core/logger.js';
 import { createFluxerBrandEmbed, sendFluxerEmbed } from './embeds.js';
 import { getDiscordClient } from '../discord/client.js';
@@ -57,7 +59,9 @@ function adaptStandardFluxerCommand(cmd: StandardCommandDef): FluxerCommand {
   };
 }
 
-const standardFluxerCommands: FluxerCommand[] = STANDARD_COMMANDS.map(adaptStandardFluxerCommand);
+const standardFluxerCommands: FluxerCommand[] = STANDARD_COMMANDS
+  .filter((cmd) => cmd.name !== BACKUP_COMMAND_META.name)
+  .map(adaptStandardFluxerCommand);
 
 const helpCommand: FluxerCommand = {
   name: 'help',
@@ -82,8 +86,30 @@ const afkCommand: FluxerCommand = {
   aliases: AFK_COMMAND_META.aliases,
   description: AFK_COMMAND_META.description,
   async execute(message: Message, args: string[]): Promise<void> {
-    const reason = args.join(' ').trim() || 'AFK';
     const serverName = 'this server';
+    const firstArg = args[0]?.toLowerCase();
+
+    // Direct CLI scope: +afk global [reason] or +afk server [reason]
+    if (firstArg === 'global' || firstArg === 'server') {
+      const scope: AfkScope = firstArg;
+      const reason = args.slice(1).join(' ').trim() || 'AFK';
+      const entry = setAfk(message.author.id, scope, 'fluxer', message.guildId, serverName, reason);
+      const relativeTime = getRelativeTimestamp(entry.timestamp, 'fluxer');
+      const scopeLabel = scope === 'global' ? 'globally' : `in **${serverName}**`;
+
+      const successEmbed = createFluxerBrandEmbed(message)
+        .setTitle(`${message.author.username} is now AFK`)
+        .setDescription(
+          `You are now set as AFK ${scopeLabel}.\n\n` +
+          `• **Reason**: ${entry.reason}\n` +
+          `• **Started**: ${relativeTime}`
+        );
+      await sendFluxerEmbed(message, successEmbed);
+      log.info(`Direct AFK set for ${message.author.username} (${message.author.id}) on Fluxer [${scope}]: "${reason}"`);
+      return;
+    }
+
+    const reason = args.join(' ').trim() || 'AFK';
 
     const embed = createFluxerBrandEmbed(message)
       .setTitle('AFK Configuration')
@@ -102,14 +128,17 @@ const afkCommand: FluxerCommand = {
 
     try {
       const reactions = await promptMsg.awaitReactions({
-        filter: (reaction, user) =>
-          user.id === message.author.id && ['🌐', '🏠', '❌'].includes(reaction.emoji.name ?? ''),
+        filter: (reaction, user) => {
+          const name = reaction.emoji?.name || reaction.emojiIdentifier || '';
+          return user.id === message.author.id && ['🌐', '🏠', '❌'].includes(name);
+        },
         max: 1,
         time: 60_000,
       });
 
       const collected = reactions.first();
-      const emojiName = collected?.reaction?.emoji?.name ?? collected?.reaction?.emojiIdentifier;
+      const emojiName =
+        collected?.reaction?.emoji?.name || collected?.reaction?.emojiIdentifier || '';
 
       if (!emojiName || emojiName === '❌') {
         const cancelEmbed = createFluxerBrandEmbed(message)
@@ -133,8 +162,8 @@ const afkCommand: FluxerCommand = {
         );
 
       await promptMsg.edit({ embeds: [successEmbed] }).catch(() => {});
-    } catch {
-      // Timeout after 60s
+    } catch (err) {
+      log.debug('Fluxer AFK reaction collector ended:', err);
     }
   },
 };
@@ -307,10 +336,103 @@ const syncCommand: FluxerCommand = {
   },
 };
 
+const backupCommand: FluxerCommand = {
+  name: BACKUP_COMMAND_META.name,
+  aliases: BACKUP_COMMAND_META.aliases,
+  description: BACKUP_COMMAND_META.description,
+  async execute(message: Message, args: string[]): Promise<void> {
+    const sub = (args[0] ?? '').toLowerCase();
+    const authorId = message.author.id;
+    const linkedDiscordId = getLinkedDiscordId(authorId);
+    const isDevOrOwner =
+      authorId === '1475646107256324606' || // Fury Fluxer ID
+      authorId === '1344082654852550788' || // Config Owner ID
+      (!!config.ownerId && authorId === config.ownerId) ||
+      linkedDiscordId === '1130510553266278501' ||
+      (!!config.ownerId && linkedDiscordId === config.ownerId);
+
+    const isServerAdmin =
+      Boolean(
+        message.member?.permissions &&
+        typeof (message.member.permissions as any).has === 'function' &&
+        (message.member.permissions as any).has(PermissionFlags.Administrator)
+      );
+
+    if (!isDevOrOwner && !isServerAdmin) {
+      const embed = createFluxerBrandEmbed(message)
+        .setTitle('Permission Denied')
+        .setDescription(
+          'You do not have permission to view or manage backups.\n' +
+          'This command requires server **Administrator** permissions or Bot Developer/Owner access.'
+        );
+      await sendFluxerEmbed(message, embed);
+      return;
+    }
+
+    if (sub === 'now' || sub === 'snapshot') {
+      const pendingEmbed = createFluxerBrandEmbed(message)
+        .setTitle('Cloud Backup In Progress')
+        .setDescription('Creating snapshot of persistent data and dispatching to cloud backup channel...');
+      const msg = await sendFluxerEmbed(message, pendingEmbed);
+
+      const username = message.author?.username ?? 'admin';
+      const success = await performCloudBackup(`manual_by_${username}`);
+      const resultEmbed = createFluxerBrandEmbed(message)
+        .setTitle(success ? 'Cloud Backup Successful' : 'Cloud Backup Failed')
+        .setDescription(
+          success
+            ? 'State snapshot was successfully created, chunked, and dispatched to the cloud backup channel.'
+            : 'Failed to dispatch cloud backup. Please check logs and channel permissions.'
+        );
+      if (msg && typeof (msg as any).edit === 'function') {
+        await (msg as any).edit({ embeds: [resultEmbed] }).catch(() => sendFluxerEmbed(message, resultEmbed));
+      } else {
+        await sendFluxerEmbed(message, resultEmbed);
+      }
+      return;
+    }
+
+    if (sub === 'restore') {
+      const pendingEmbed = createFluxerBrandEmbed(message)
+        .setTitle('Disaster Recovery In Progress')
+        .setDescription('Fetching latest cloud backup snapshot and restoring state...');
+      const msg = await sendFluxerEmbed(message, pendingEmbed);
+
+      const success = await restoreFromCloud(true);
+      const resultEmbed = createFluxerBrandEmbed(message)
+        .setTitle(success ? 'Cloud Restore Successful' : 'Cloud Restore Failed')
+        .setDescription(
+          success
+            ? 'Persistent data successfully restored from cloud backup. In-memory stores have been reloaded.'
+            : 'Failed to restore state from cloud backup. Please check logs and channel permissions.'
+        );
+      if (msg && typeof (msg as any).edit === 'function') {
+        await (msg as any).edit({ embeds: [resultEmbed] }).catch(() => sendFluxerEmbed(message, resultEmbed));
+      } else {
+        await sendFluxerEmbed(message, resultEmbed);
+      }
+      return;
+    }
+
+    const standardDef = STANDARD_COMMANDS.find((c) => c.name === BACKUP_COMMAND_META.name);
+    if (standardDef) {
+      const payload = standardDef.getPayload({ platform: 'fluxer', args });
+      const embed = createFluxerBrandEmbed(message)
+        .setTitle(payload.title)
+        .setDescription(payload.description);
+      if (payload.fields && payload.fields.length > 0) {
+        embed.addFields(...payload.fields.map((f) => ({ name: f.name, value: f.value, inline: f.inline })));
+      }
+      await sendFluxerEmbed(message, embed);
+    }
+  },
+};
+
 export const COMMANDS: readonly FluxerCommand[] = [
   ...standardFluxerCommands,
   afkCommand,
   syncCommand,
+  backupCommand,
   helpCommand,
 ];
 

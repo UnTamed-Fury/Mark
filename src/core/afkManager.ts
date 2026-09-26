@@ -3,7 +3,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { createLogger } from './logger.js';
 import { getDataDir, getAfkFilePath } from './dataDir.js';
-import { getLinkedDiscordId, getLinkedFluxerId } from './syncManager.js';
+import { getLinkedDiscordId, getLinkedFluxerId, migrateSyncStoreToV2, type MigrationResult } from './syncManager.js';
 
 const log = createLogger('AfkManager');
 
@@ -26,6 +26,26 @@ export interface AfkActivityEvent {
   readonly reason: string;
   readonly timestamp: number;
   readonly durationMs?: number;
+  readonly scope?: AfkScope;
+}
+
+export type AfkEventListener = (event: AfkActivityEvent) => void;
+const afkEventListeners = new Set<AfkEventListener>();
+
+export function onAfkEvent(listener: AfkEventListener): () => void {
+  afkEventListeners.add(listener);
+  return () => afkEventListeners.delete(listener);
+}
+
+function emitAfkEvent(event: AfkActivityEvent): void {
+  recentAfkEvents.push(event);
+  for (const listener of afkEventListeners) {
+    try {
+      listener(event);
+    } catch (err) {
+      log.error('Error in afk event listener:', err);
+    }
+  }
 }
 
 // Memory cache:
@@ -40,18 +60,145 @@ const NOTIFY_COOLDOWN_MS = (config.afkMentionCooldownSec || 10) * 1000;
 // Recent AFK activity buffer (for 5-min batch logs)
 const recentAfkEvents: AfkActivityEvent[] = [];
 
+export interface GlobalAfkRecordV2 {
+  readonly id: string;
+  readonly syncStatus: 'synced' | 'unlinked';
+  readonly accounts: {
+    readonly discordId: string | null;
+    readonly fluxerId: string | null;
+  };
+  readonly reason: string;
+  readonly origin: {
+    readonly platform: 'discord' | 'fluxer';
+    readonly guildId: string | null;
+    readonly guildName: string | null;
+  };
+  readonly startedAt: number;
+  readonly startedAtIso: string;
+}
+
+export interface ServerAfkRecordV2 {
+  readonly id: string;
+  readonly syncStatus: 'synced' | 'unlinked';
+  readonly accounts: {
+    readonly discordId: string | null;
+    readonly fluxerId: string | null;
+  };
+  readonly platform: 'discord' | 'fluxer';
+  readonly guildId: string;
+  readonly guildName: string;
+  readonly reason: string;
+  readonly startedAt: number;
+  readonly startedAtIso: string;
+}
+
+export interface AfkStoreDocumentV2 {
+  readonly version: string;
+  readonly updatedAt: string;
+  readonly stats: {
+    readonly totalActive: number;
+    readonly globalCount: number;
+    readonly serverCount: number;
+  };
+  readonly global: GlobalAfkRecordV2[];
+  readonly server: ServerAfkRecordV2[];
+}
+
 export function loadAfkStore(): void {
   try {
     const filePath = getAfkFilePath();
     if (fs.existsSync(filePath)) {
       const data = fs.readFileSync(filePath, 'utf-8');
-      const parsed: AfkUserEntry[] = JSON.parse(data);
+      const parsed = JSON.parse(data);
       afkStore.clear();
-      for (const entry of parsed) {
-        const key = getStorageKey(entry.userId, entry.scope, entry.platform, entry.guildId);
-        afkStore.set(key, entry);
+
+      let isLegacyV1 = false;
+      if (Array.isArray(parsed)) {
+        // Legacy v1 format
+        isLegacyV1 = true;
+        for (const entry of parsed) {
+          if (!entry || !entry.userId) continue;
+          const key = getStorageKey(entry.userId, entry.scope || 'global', entry.platform || 'discord', entry.guildId);
+          afkStore.set(key, entry);
+        }
+      } else if (parsed && typeof parsed === 'object') {
+        // v2 format with global & server partitions
+        if (Array.isArray(parsed.global)) {
+          for (const item of parsed.global) {
+            const reason = item.reason || 'AFK';
+            const timestamp = Number(item.startedAt) || Date.now();
+            const originGuildId = item.origin?.guildId || null;
+            const originGuildName = item.origin?.guildName || null;
+
+            if (item.accounts?.discordId) {
+              const dEntry: AfkUserEntry = {
+                userId: String(item.accounts.discordId),
+                scope: 'global',
+                platform: 'discord',
+                guildId: originGuildId,
+                guildName: originGuildName,
+                reason,
+                timestamp,
+              };
+              afkStore.set(`global:${dEntry.userId}`, dEntry);
+            }
+
+            if (item.accounts?.fluxerId) {
+              const fEntry: AfkUserEntry = {
+                userId: String(item.accounts.fluxerId),
+                scope: 'global',
+                platform: 'fluxer',
+                guildId: item.origin?.platform === 'fluxer' ? originGuildId : null,
+                guildName: item.origin?.platform === 'fluxer' ? originGuildName : null,
+                reason,
+                timestamp,
+              };
+              afkStore.set(`global:${fEntry.userId}`, fEntry);
+            }
+          }
+        }
+
+        if (Array.isArray(parsed.server)) {
+          for (const item of parsed.server) {
+            const platform: 'discord' | 'fluxer' = item.platform === 'fluxer' ? 'fluxer' : 'discord';
+            const userId = String(
+              platform === 'discord'
+                ? item.accounts?.discordId || item.userId || ''
+                : item.accounts?.fluxerId || item.userId || ''
+            );
+            if (!userId) continue;
+
+            const entry: AfkUserEntry = {
+              userId,
+              scope: 'server',
+              platform,
+              guildId: item.guildId || 'unknown_guild',
+              guildName: item.guildName || null,
+              reason: item.reason || 'AFK',
+              timestamp: Number(item.startedAt) || Date.now(),
+            };
+            const key = getStorageKey(entry.userId, 'server', entry.platform, entry.guildId);
+            afkStore.set(key, entry);
+          }
+        }
+
+        // Support flat records array if present
+        if (Array.isArray(parsed.records)) {
+          for (const r of parsed.records) {
+            if (!r || !r.userId) continue;
+            const key = getStorageKey(r.userId, r.scope || 'global', r.platform || 'discord', r.guildId);
+            afkStore.set(key, r);
+          }
+        }
       }
+
       log.info(`Loaded ${afkStore.size} active AFK records from disk`);
+
+      if (isLegacyV1) {
+        log.info(`Auto-migrating legacy v1 afk.json to v2 format (${afkStore.size} records)...`);
+        saveAfkStore();
+        log.info('Successfully auto-migrated afk.json to v2 format on disk');
+      }
     }
   } catch (error) {
     log.error('Failed to load AFK store from disk:', error);
@@ -65,9 +212,88 @@ export function saveAfkStore(): void {
       fs.mkdirSync(dataDir, { recursive: true });
     }
     const filePath = getAfkFilePath();
-    const list = Array.from(afkStore.values());
+
+    const globalRecords: GlobalAfkRecordV2[] = [];
+    const serverRecords: ServerAfkRecordV2[] = [];
+    const processedGlobalUserIds = new Set<string>();
+
+    for (const entry of afkStore.values()) {
+      if (entry.scope === 'global') {
+        if (processedGlobalUserIds.has(entry.userId)) {
+          continue;
+        }
+
+        const linkedDiscord = entry.platform === 'fluxer' ? getLinkedDiscordId(entry.userId) : null;
+        const linkedFluxer = entry.platform === 'discord' ? getLinkedFluxerId(entry.userId) : null;
+
+        const discordId = entry.platform === 'discord' ? entry.userId : (linkedDiscord || null);
+        const fluxerId = entry.platform === 'fluxer' ? entry.userId : (linkedFluxer || null);
+
+        processedGlobalUserIds.add(entry.userId);
+        if (discordId) processedGlobalUserIds.add(discordId);
+        if (fluxerId) processedGlobalUserIds.add(fluxerId);
+
+        const isSynced = Boolean(discordId && fluxerId);
+        const primaryId = discordId || fluxerId || entry.userId;
+
+        globalRecords.push({
+          id: `afk_global_${primaryId}`,
+          syncStatus: isSynced ? 'synced' : 'unlinked',
+          accounts: {
+            discordId: discordId || null,
+            fluxerId: fluxerId || null,
+          },
+          reason: entry.reason,
+          origin: {
+            platform: entry.platform,
+            guildId: entry.guildId || null,
+            guildName: entry.guildName || null,
+          },
+          startedAt: entry.timestamp,
+          startedAtIso: new Date(entry.timestamp).toISOString(),
+        });
+      } else {
+        // Server AFK
+        const linkedDiscord = entry.platform === 'fluxer' ? getLinkedDiscordId(entry.userId) : null;
+        const linkedFluxer = entry.platform === 'discord' ? getLinkedFluxerId(entry.userId) : null;
+
+        const discordId = entry.platform === 'discord' ? entry.userId : (linkedDiscord || null);
+        const fluxerId = entry.platform === 'fluxer' ? entry.userId : (linkedFluxer || null);
+        const isSynced = Boolean(discordId && fluxerId);
+        const targetGuildId = entry.guildId || 'unknown_guild';
+        const targetGuildName = entry.guildName || (entry.platform === 'discord' ? 'Discord Server' : 'Fluxer Guild');
+
+        serverRecords.push({
+          id: `afk_server_${entry.userId}_${targetGuildId}`,
+          syncStatus: isSynced ? 'synced' : 'unlinked',
+          accounts: {
+            discordId: discordId || null,
+            fluxerId: fluxerId || null,
+          },
+          platform: entry.platform,
+          guildId: targetGuildId,
+          guildName: targetGuildName,
+          reason: entry.reason,
+          startedAt: entry.timestamp,
+          startedAtIso: new Date(entry.timestamp).toISOString(),
+        });
+      }
+    }
+
+    const document: AfkStoreDocumentV2 = {
+      version: '2.0.0',
+      updatedAt: new Date().toISOString(),
+      stats: {
+        totalActive: globalRecords.length + serverRecords.length,
+        globalCount: globalRecords.length,
+        serverCount: serverRecords.length,
+      },
+      global: globalRecords,
+      server: serverRecords,
+    };
+
     const tempFile = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(list, null, 2), 'utf-8');
+    fs.writeFileSync(tempFile, JSON.stringify(document, null, 2), 'utf-8');
     fs.renameSync(tempFile, filePath);
   } catch (error) {
     log.error('Failed to save AFK store to disk:', error);
@@ -132,12 +358,13 @@ export function setAfk(
     }
   }
 
-  recentAfkEvents.push({
+  emitAfkEvent({
     userId,
     platform,
     type: 'set',
     reason: entry.reason,
     timestamp,
+    scope,
   });
 
   saveAfkStore();
@@ -156,7 +383,7 @@ export function getAfk(
   }
 
   // 2. Check linked account global entry
-  const linkedId = platform === 'discord' ? getLinkedFluxerId(userId) : getLinkedDiscordId(userId);
+  const linkedId = getLinkedFluxerId(userId) || getLinkedDiscordId(userId);
   if (linkedId) {
     const linkedGlobal = afkStore.get(`global:${linkedId}`);
     if (linkedGlobal) {
@@ -176,6 +403,14 @@ export function getAfk(
   return null;
 }
 
+export function isAfk(
+  userId: string,
+  platform: 'discord' | 'fluxer',
+  guildId?: string | null,
+): boolean {
+  return getAfk(userId, platform, guildId) !== null;
+}
+
 export function clearAfk(
   userId: string,
   platform: 'discord' | 'fluxer',
@@ -188,10 +423,11 @@ export function clearAfk(
 
   const key = getStorageKey(entry.userId, entry.scope, entry.platform, entry.guildId);
   afkStore.delete(key);
+  afkStore.delete(`global:${userId}`);
 
   // If it was global, also clear linked account if present
   if (entry.scope === 'global') {
-    const linkedId = platform === 'discord' ? getLinkedFluxerId(userId) : getLinkedDiscordId(userId);
+    const linkedId = getLinkedFluxerId(userId) || getLinkedDiscordId(userId);
     if (linkedId) {
       afkStore.delete(`global:${linkedId}`);
     }
@@ -200,13 +436,14 @@ export function clearAfk(
   const now = Date.now();
   const durationMs = now - entry.timestamp;
 
-  recentAfkEvents.push({
+  emitAfkEvent({
     userId,
     platform,
     type: 'cleared',
     reason: entry.reason,
     timestamp: now,
     durationMs,
+    scope: entry.scope,
   });
 
   saveAfkStore();
@@ -289,6 +526,57 @@ export function clearAllAfk(): void {
   } catch {
     // Ignore unlink error
   }
+}
+
+export function migrateAfkStoreToV2(options: { backup?: boolean; filePath?: string } = {}): MigrationResult {
+  const filePath = options.filePath || getAfkFilePath();
+  if (!fs.existsSync(filePath)) {
+    return { migrated: false, totalRecords: 0 };
+  }
+
+  const rawData = fs.readFileSync(filePath, 'utf-8');
+  let parsed: any;
+  try {
+    parsed = JSON.parse(rawData);
+  } catch {
+    return { migrated: false, totalRecords: 0 };
+  }
+
+  const isV1Array = Array.isArray(parsed);
+  const isV2 =
+    parsed &&
+    typeof parsed === 'object' &&
+    parsed.version === '2.0.0' &&
+    Array.isArray(parsed.global) &&
+    Array.isArray(parsed.server);
+
+  if (!isV1Array && isV2) {
+    return { migrated: false, totalRecords: parsed.global.length + parsed.server.length };
+  }
+
+  let backupPath: string | undefined;
+  if (options.backup !== false) {
+    backupPath = `${filePath}.v1.bak.${Date.now()}`;
+    fs.writeFileSync(backupPath, rawData, 'utf-8');
+  }
+
+  loadAfkStore();
+  saveAfkStore();
+
+  return {
+    migrated: true,
+    totalRecords: afkStore.size,
+    backupPath,
+  };
+}
+
+export function migrateStoresToV2(options: { backup?: boolean } = {}): {
+  sync: MigrationResult;
+  afk: MigrationResult;
+} {
+  const sync = migrateSyncStoreToV2(options);
+  const afk = migrateAfkStoreToV2(options);
+  return { sync, afk };
 }
 
 // Initial load
