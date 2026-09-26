@@ -3,7 +3,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { createLogger } from './logger.js';
 import { getDataDir, getAfkFilePath } from './dataDir.js';
-import { getLinkedDiscordId, getLinkedFluxerId } from './syncManager.js';
+import { getLinkedDiscordId, getLinkedFluxerId, migrateSyncStoreToV2, type MigrationResult } from './syncManager.js';
 
 const log = createLogger('AfkManager');
 
@@ -112,8 +112,10 @@ export function loadAfkStore(): void {
       const parsed = JSON.parse(data);
       afkStore.clear();
 
+      let isLegacyV1 = false;
       if (Array.isArray(parsed)) {
         // Legacy v1 format
+        isLegacyV1 = true;
         for (const entry of parsed) {
           if (!entry || !entry.userId) continue;
           const key = getStorageKey(entry.userId, entry.scope || 'global', entry.platform || 'discord', entry.guildId);
@@ -191,6 +193,12 @@ export function loadAfkStore(): void {
       }
 
       log.info(`Loaded ${afkStore.size} active AFK records from disk`);
+
+      if (isLegacyV1) {
+        log.info(`Auto-migrating legacy v1 afk.json to v2 format (${afkStore.size} records)...`);
+        saveAfkStore();
+        log.info('Successfully auto-migrated afk.json to v2 format on disk');
+      }
     }
   } catch (error) {
     log.error('Failed to load AFK store from disk:', error);
@@ -395,6 +403,14 @@ export function getAfk(
   return null;
 }
 
+export function isAfk(
+  userId: string,
+  platform: 'discord' | 'fluxer',
+  guildId?: string | null,
+): boolean {
+  return getAfk(userId, platform, guildId) !== null;
+}
+
 export function clearAfk(
   userId: string,
   platform: 'discord' | 'fluxer',
@@ -510,6 +526,57 @@ export function clearAllAfk(): void {
   } catch {
     // Ignore unlink error
   }
+}
+
+export function migrateAfkStoreToV2(options: { backup?: boolean; filePath?: string } = {}): MigrationResult {
+  const filePath = options.filePath || getAfkFilePath();
+  if (!fs.existsSync(filePath)) {
+    return { migrated: false, totalRecords: 0 };
+  }
+
+  const rawData = fs.readFileSync(filePath, 'utf-8');
+  let parsed: any;
+  try {
+    parsed = JSON.parse(rawData);
+  } catch {
+    return { migrated: false, totalRecords: 0 };
+  }
+
+  const isV1Array = Array.isArray(parsed);
+  const isV2 =
+    parsed &&
+    typeof parsed === 'object' &&
+    parsed.version === '2.0.0' &&
+    Array.isArray(parsed.global) &&
+    Array.isArray(parsed.server);
+
+  if (!isV1Array && isV2) {
+    return { migrated: false, totalRecords: parsed.global.length + parsed.server.length };
+  }
+
+  let backupPath: string | undefined;
+  if (options.backup !== false) {
+    backupPath = `${filePath}.v1.bak.${Date.now()}`;
+    fs.writeFileSync(backupPath, rawData, 'utf-8');
+  }
+
+  loadAfkStore();
+  saveAfkStore();
+
+  return {
+    migrated: true,
+    totalRecords: afkStore.size,
+    backupPath,
+  };
+}
+
+export function migrateStoresToV2(options: { backup?: boolean } = {}): {
+  sync: MigrationResult;
+  afk: MigrationResult;
+} {
+  const sync = migrateSyncStoreToV2(options);
+  const afk = migrateAfkStoreToV2(options);
+  return { sync, afk };
 }
 
 // Initial load

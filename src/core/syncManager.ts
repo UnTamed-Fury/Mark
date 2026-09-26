@@ -80,9 +80,11 @@ export function loadSyncStore(): void {
     if (fs.existsSync(filePath)) {
       const data = fs.readFileSync(filePath, 'utf-8');
       const parsed = JSON.parse(data);
+      let isLegacyV1 = false;
       let rawLinks: any[] = [];
       if (Array.isArray(parsed)) {
         // v1 legacy array
+        isLegacyV1 = true;
         rawLinks = parsed;
       } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.links)) {
         // v2 structured document
@@ -102,6 +104,12 @@ export function loadSyncStore(): void {
         fluxerToLink.set(link.fluxerId, link);
       }
       log.info(`Loaded ${discordToLink.size} account links from disk`);
+
+      if (isLegacyV1) {
+        log.info(`Auto-migrating legacy v1 sync.json to v2 format (${discordToLink.size} links)...`);
+        saveSyncStore();
+        log.info('Successfully auto-migrated sync.json to v2 format on disk');
+      }
     }
   } catch (error) {
     log.error('Failed to load sync store from disk:', error);
@@ -322,6 +330,49 @@ export function linkUsersManually(discordId: string, fluxerId: string): UserLink
   });
   log.info(`Manually linked Discord (${discordId}) with Fluxer (${fluxerId})`);
   return link;
+}
+
+export interface MigrationResult {
+  migrated: boolean;
+  totalRecords: number;
+  backupPath?: string;
+}
+
+export function migrateSyncStoreToV2(options: { backup?: boolean; filePath?: string } = {}): MigrationResult {
+  const filePath = options.filePath || getSyncFilePath();
+  if (!fs.existsSync(filePath)) {
+    return { migrated: false, totalRecords: 0 };
+  }
+
+  const rawData = fs.readFileSync(filePath, 'utf-8');
+  let parsed: any;
+  try {
+    parsed = JSON.parse(rawData);
+  } catch {
+    return { migrated: false, totalRecords: 0 };
+  }
+
+  const isV1Array = Array.isArray(parsed);
+  const isV2 = parsed && typeof parsed === 'object' && parsed.version === '2.0.0' && Array.isArray(parsed.links);
+
+  if (!isV1Array && isV2) {
+    return { migrated: false, totalRecords: parsed.links.length };
+  }
+
+  let backupPath: string | undefined;
+  if (options.backup !== false) {
+    backupPath = `${filePath}.v1.bak.${Date.now()}`;
+    fs.writeFileSync(backupPath, rawData, 'utf-8');
+  }
+
+  loadSyncStore();
+  saveSyncStore();
+
+  return {
+    migrated: true,
+    totalRecords: discordToLink.size,
+    backupPath,
+  };
 }
 
 // Initial load

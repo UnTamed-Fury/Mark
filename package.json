@@ -14,7 +14,9 @@
     "start": "node --max-old-space-size=128 dist/index.js",
     "dev": "tsx watch src/index.ts",
     "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:stress": "vitest run tests/tests2.test.ts",
+    "migrate:v2": "tsx scripts/migrate-to-v2.ts"
   },
   "engines": {
     "node": ">=22.0.0",
