@@ -80,13 +80,8 @@ export function loadSyncStore(): void {
     if (fs.existsSync(filePath)) {
       const data = fs.readFileSync(filePath, 'utf-8');
       const parsed = JSON.parse(data);
-      let isLegacyV1 = false;
       let rawLinks: any[] = [];
-      if (Array.isArray(parsed)) {
-        // v1 legacy array
-        isLegacyV1 = true;
-        rawLinks = parsed;
-      } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.links)) {
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.links)) {
         // v2 structured document
         rawLinks = parsed.links;
       }
@@ -104,12 +99,6 @@ export function loadSyncStore(): void {
         fluxerToLink.set(link.fluxerId, link);
       }
       log.info(`Loaded ${discordToLink.size} account links from disk`);
-
-      if (isLegacyV1) {
-        log.info(`Auto-migrating legacy v1 sync.json to v2 format (${discordToLink.size} links)...`);
-        saveSyncStore();
-        log.info('Successfully auto-migrated sync.json to v2 format on disk');
-      }
     }
   } catch (error) {
     log.error('Failed to load sync store from disk:', error);

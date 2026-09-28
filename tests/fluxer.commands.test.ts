@@ -140,6 +140,17 @@ describe('Fluxer Commands Registry and Executors', () => {
     expect(replies[0].embeds![0].data.description).toContain('Studying for exams');
   });
 
+  it('supports Easter egg platform-only CLI afk (+afk platform [reason] / +afk fluxer [reason])', async () => {
+    const { message, replies } = createMockFluxerMessage('+afk fluxer Working on bot', 'afk-cli-user-fx');
+    const cmd = getFluxerCommand('afk');
+    await cmd!.execute(message, ['fluxer', 'Working', 'on', 'bot']);
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0].embeds![0].data.title).toContain('TestUser is now AFK');
+    expect(replies[0].embeds![0].data.description).toContain('across all **Fluxer** servers');
+    expect(replies[0].embeds![0].data.description).toContain('Working on bot');
+  });
+
   it('rejects unprivileged users from running backup command', async () => {
     const { message, replies } = createMockFluxerMessage('+backup', 'random-user-id');
     const cmd = getFluxerCommand('backup');

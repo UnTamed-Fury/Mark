@@ -12,6 +12,7 @@ import {
   type StandardCommandDef,
 } from '../../core/commandEngine.js';
 import { setAfk, getRelativeTimestamp, type AfkScope } from '../../core/afkManager.js';
+import { getAfkSetRoast, truncateAfkReason } from '../../core/afkRoast.js';
 import { createSyncCode, claimSyncCode, getLinkedDiscordId, unlinkUser } from '../../core/syncManager.js';
 import { performCloudBackup, restoreFromCloud } from '../../core/cloudBackup.js';
 import { createLogger } from '../../core/logger.js';
@@ -89,32 +90,68 @@ const afkCommand: FluxerCommand = {
     const serverName = 'this server';
     const firstArg = args[0]?.toLowerCase();
 
-    // Direct CLI scope: +afk global [reason] or +afk server [reason]
-    if (firstArg === 'global' || firstArg === 'server') {
-      const scope: AfkScope = firstArg;
+    // Direct CLI scope: +afk global [reason], +afk server [reason], or Easter egg: +afk platform|fluxer|discord [reason]
+    if (
+      firstArg === 'global' ||
+      firstArg === 'server' ||
+      firstArg === 'platform' ||
+      firstArg === 'fluxer' ||
+      firstArg === 'discord'
+    ) {
+      let scope: AfkScope = 'server';
+      let targetPlatform: 'discord' | 'fluxer' = 'fluxer';
+      let targetUserId = message.author.id;
+      let scopeLabel = `in **${serverName}**`;
+
+      if (firstArg === 'global') {
+        scope = 'global';
+        scopeLabel = 'globally';
+      } else if (firstArg === 'platform' || firstArg === 'fluxer') {
+        scope = 'platform';
+        targetPlatform = 'fluxer';
+        scopeLabel = 'across all **Fluxer** servers';
+      } else if (firstArg === 'discord') {
+        const linkedDiscordId = getLinkedDiscordId(message.author.id);
+        if (!linkedDiscordId) {
+          const unlinkedEmbed = createFluxerBrandEmbed(message)
+            .setTitle('Account Not Linked')
+            .setDescription('You must link your accounts with `+sync` before setting a Discord platform AFK from Fluxer.');
+          await sendFluxerEmbed(message, unlinkedEmbed);
+          return;
+        }
+        scope = 'platform';
+        targetPlatform = 'discord';
+        targetUserId = linkedDiscordId;
+        scopeLabel = 'across all **Discord** servers';
+      }
+
       const reason = args.slice(1).join(' ').trim() || 'AFK';
-      const entry = setAfk(message.author.id, scope, 'fluxer', message.guildId, serverName, reason);
+      const entry = setAfk(targetUserId, scope, targetPlatform, message.guildId, serverName, reason);
       const relativeTime = getRelativeTimestamp(entry.timestamp, 'fluxer');
-      const scopeLabel = scope === 'global' ? 'globally' : `in **${serverName}**`;
+      const displayReason = truncateAfkReason(entry.reason);
+      const roast = getAfkSetRoast(entry.reason);
+      const roastSection = roast ? `\n\n> *${roast}*` : '';
 
       const successEmbed = createFluxerBrandEmbed(message)
         .setTitle(`${message.author.username} is now AFK`)
         .setDescription(
           `You are now set as AFK ${scopeLabel}.\n\n` +
-          `• **Reason**: ${entry.reason}\n` +
-          `• **Started**: ${relativeTime}`
+          `• **Reason**: ${displayReason}\n` +
+          `• **Started**: ${relativeTime}` +
+          roastSection
         );
       await sendFluxerEmbed(message, successEmbed);
-      log.info(`Direct AFK set for ${message.author.username} (${message.author.id}) on Fluxer [${scope}]: "${reason}"`);
+      log.info(`Direct AFK set for ${message.author.username} (${message.author.id}) on Fluxer [${scope}/${targetPlatform}]: "${reason}"`);
       return;
     }
 
     const reason = args.join(' ').trim() || 'AFK';
+    const displayPromptReason = truncateAfkReason(reason);
 
     const embed = createFluxerBrandEmbed(message)
       .setTitle('AFK Configuration')
       .setDescription(
-        `React below to choose your AFK scope for reason: **${reason}**\n\n` +
+        `React below to choose your AFK scope for reason: **${displayPromptReason}**\n\n` +
         `🌐 **Global AFK**: Set AFK across all servers (Discord & Fluxer).\n` +
         `🏠 **Server Only**: Set AFK only in this server.\n` +
         `❌ **Cancel**: Cancel AFK setup.`
@@ -152,13 +189,17 @@ const afkCommand: FluxerCommand = {
       const entry = setAfk(message.author.id, scope, 'fluxer', message.guildId, serverName, reason);
       const relativeTime = getRelativeTimestamp(entry.timestamp, 'fluxer');
       const scopeLabel = scope === 'global' ? 'globally' : `in **${serverName}**`;
+      const displayReason = truncateAfkReason(entry.reason);
+      const roast = getAfkSetRoast(entry.reason);
+      const roastSection = roast ? `\n\n> *${roast}*` : '';
 
       const successEmbed = createFluxerBrandEmbed(message)
         .setTitle(`${message.author.username} is now AFK`)
         .setDescription(
           `You are now set as AFK ${scopeLabel}.\n\n` +
-          `• **Reason**: ${entry.reason}\n` +
-          `• **Started**: ${relativeTime}`
+          `• **Reason**: ${displayReason}\n` +
+          `• **Started**: ${relativeTime}` +
+          roastSection
         );
 
       await promptMsg.edit({ embeds: [successEmbed] }).catch(() => {});

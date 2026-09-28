@@ -53,6 +53,20 @@ describe('AFK Manager', () => {
       expect(getAfk('user3', 'fluxer', 'guild1')).toBeNull();
     });
 
+    it('sets and retrieves platform-only AFK status', () => {
+      const entry = setAfk('userPlatform', 'platform', 'discord', null, null, 'Discord only AFK');
+      expect(entry.userId).toBe('userPlatform');
+      expect(entry.scope).toBe('platform');
+      expect(entry.reason).toBe('Discord only AFK');
+
+      // Found in guild1 on discord
+      expect(getAfk('userPlatform', 'discord', 'guild1')).toEqual(entry);
+      // Found in guild2 on discord
+      expect(getAfk('userPlatform', 'discord', 'guild2')).toEqual(entry);
+      // NOT found on fluxer in any guild
+      expect(getAfk('userPlatform', 'fluxer', 'guild1')).toBeNull();
+    });
+
     it('replaces existing AFK when setting new AFK', () => {
       setAfk('user4', 'server', 'discord', 'guild1', 'Guild One', 'First reason');
       const updated = setAfk('user4', 'global', 'discord', 'guild1', 'Guild One', 'New global reason');
@@ -84,6 +98,21 @@ describe('AFK Manager', () => {
       const cleared = clearAfk('user6', 'discord', 'guild1');
       expect(cleared).not.toBeNull();
       expect(getAfk('user6', 'discord', 'guild1')).toBeNull();
+    });
+
+    it('clears platform AFK on the active platform but leaves other platforms unaffected', () => {
+      setAfk('userP2', 'platform', 'discord', null, null, 'Only on Discord');
+
+      // Talking on fluxer does not clear it
+      const clearedFluxer = clearAfk('userP2', 'fluxer', 'guild1');
+      expect(clearedFluxer).toBeNull();
+      expect(getAfk('userP2', 'discord', 'guild1')).not.toBeNull();
+
+      // Talking on discord clears it
+      const clearedDiscord = clearAfk('userP2', 'discord', 'guild1');
+      expect(clearedDiscord).not.toBeNull();
+      expect(clearedDiscord?.reason).toBe('Only on Discord');
+      expect(getAfk('userP2', 'discord', 'guild1')).toBeNull();
     });
 
     it('returns null when clearing non-existent AFK', () => {

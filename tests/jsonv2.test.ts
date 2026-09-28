@@ -41,25 +41,26 @@ describe('JSON v2 Data Architecture Test Suite', () => {
       expect(typeof raw.links[0].linkedAtIso).toBe('string');
     });
 
-    it('loads legacy v1 array format and seamlessly migrates to v2', () => {
+    it('loads and parses v2 structured format directly from disk', () => {
       const filePath = getSyncFilePath();
-      const legacyV1Data = [
-        {
-          discordId: '999111222',
-          fluxerId: '888333444',
-          linkedAt: 1700000000000,
-        },
-      ];
-      fs.writeFileSync(filePath, JSON.stringify(legacyV1Data), 'utf-8');
+      const v2Data = {
+        version: '2.0.0',
+        updatedAt: new Date().toISOString(),
+        stats: { totalLinked: 1 },
+        links: [
+          {
+            discordId: '999111222',
+            fluxerId: '888333444',
+            linkedAt: 1700000000000,
+            linkedAtIso: new Date(1700000000000).toISOString(),
+          },
+        ],
+      };
+      fs.writeFileSync(filePath, JSON.stringify(v2Data), 'utf-8');
 
       loadSyncStore();
       const links = getAllLinks();
       expect(links.some((l) => l.discordId === '999111222' && l.fluxerId === '888333444')).toBe(true);
-
-      saveSyncStore();
-      const migrated = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-      expect(migrated.version).toBe('2.0.0');
-      expect(migrated.links.some((l: any) => l.discordId === '999111222')).toBe(true);
     });
   });
 
@@ -85,25 +86,31 @@ describe('JSON v2 Data Architecture Test Suite', () => {
       expect(typeof raw.global[0].startedAtIso).toBe('string');
     });
 
-    it('loads legacy v1 AFK array format cleanly', () => {
+    it('loads v2 AFK structured format cleanly', () => {
       const filePath = getAfkFilePath();
-      const legacyV1Data = [
-        {
-          userId: 'legacy_user_1',
-          scope: 'global',
-          platform: 'discord',
-          guildId: null,
-          guildName: null,
-          reason: 'Legacy AFK',
-          timestamp: 1700000000000,
-        },
-      ];
-      fs.writeFileSync(filePath, JSON.stringify(legacyV1Data), 'utf-8');
+      const v2AfkData = {
+        version: '2.0.0',
+        updatedAt: new Date().toISOString(),
+        stats: { totalActive: 1, globalCount: 1, serverCount: 0 },
+        global: [
+          {
+            id: 'afk_global_v2_user_1',
+            syncStatus: 'unlinked',
+            accounts: { discordId: 'v2_user_1', fluxerId: null },
+            reason: 'V2 AFK',
+            origin: { platform: 'discord', guildId: null, guildName: null },
+            startedAt: 1700000000000,
+            startedAtIso: new Date(1700000000000).toISOString(),
+          },
+        ],
+        server: [],
+      };
+      fs.writeFileSync(filePath, JSON.stringify(v2AfkData), 'utf-8');
 
       loadAfkStore();
-      const entry = getAfk('legacy_user_1', 'discord');
+      const entry = getAfk('v2_user_1', 'discord');
       expect(entry).not.toBeNull();
-      expect(entry?.reason).toBe('Legacy AFK');
+      expect(entry?.reason).toBe('V2 AFK');
     });
 
     it('handles the complex multi-user real-world scenario (4 syncs, 3 sync global, 2 sync server, 3 non-sync)', () => {

@@ -52,7 +52,7 @@ export function handleAfkMessageReturn(
   platform: 'discord' | 'fluxer',
   guildId?: string | null,
   isAfkCmd = false,
-): { cleared: boolean; entry?: AfkUserEntry; durationText?: string } {
+): { cleared: boolean; entry?: AfkUserEntry; durationText?: string; durationMs?: number } {
   if (isAfkCmd) {
     return { cleared: false };
   }
@@ -62,10 +62,12 @@ export function handleAfkMessageReturn(
     return { cleared: false };
   }
 
-  const durationText = formatDuration(Date.now() - cleared.timestamp);
+  const durationMs = Date.now() - cleared.timestamp;
+  const durationText = formatDuration(durationMs);
   return {
     cleared: true,
     entry: cleared,
     durationText,
+    durationMs,
   };
 }

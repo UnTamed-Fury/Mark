@@ -11,6 +11,11 @@ import {
   handleAfkMessageReturn,
   isAfkCommandName,
 } from '../../../core/messagePipeline.js';
+import {
+  truncateAfkReason,
+  getAfkReturnRoast,
+  getAfkMentionRoast,
+} from '../../../core/afkRoast.js';
 import { isWebsiteQuery } from '../../../core/autoResponder.js';
 import { checkCooldown, recordCommandExecution } from '../../../core/cooldown.js';
 import { createLogger } from '../../../core/logger.js';
@@ -38,12 +43,18 @@ export async function handleDiscordMessageCreate(message: Message): Promise<void
     parsed ? isAfkCommandName(parsed.commandName) : false
   );
   if (afkReturn.cleared && afkReturn.entry) {
+    const durationMs = afkReturn.durationMs ?? (Date.now() - afkReturn.entry.timestamp);
+    const roast = getAfkReturnRoast(afkReturn.entry.reason, durationMs, afkReturn.durationText);
+    const roastSection = roast ? `\n\n> *${roast}*` : '';
+    const displayReason = truncateAfkReason(afkReturn.entry.reason);
+
     const embed = createBrandEmbed(message)
       .setTitle('Welcome Back!')
       .setDescription(
         `Welcome back <@${message.author.id}>, I removed your AFK status.\n\n` +
         `• **AFK Duration**: ${afkReturn.durationText}\n` +
-        `• **Reason**: ${afkReturn.entry.reason}`
+        `• **Reason**: ${displayReason}` +
+        roastSection
       );
     await sendEmbed(message, embed).catch(() => {});
   }
@@ -92,10 +103,13 @@ export async function handleDiscordMessageCreate(message: Message): Promise<void
       const relativeTime = getRelativeTimestamp(afkEntry.timestamp);
       const targetUser = message.mentions.users.get(targetId);
       const displayName = targetUser?.displayName || targetUser?.username || 'User';
+      const displayReason = truncateAfkReason(afkEntry.reason);
+      const roast = getAfkMentionRoast(afkEntry.reason);
+      const roastSection = roast ? `\n\n> *${roast}*` : '';
 
       const embed = createBrandEmbed(message)
         .setTitle(`${displayName} is AFK`)
-        .setDescription(`<@${targetId}> is currently AFK: **${afkEntry.reason}** (${relativeTime})`);
+        .setDescription(`<@${targetId}> is currently AFK: **${displayReason}** (${relativeTime})${roastSection}`);
       await sendEmbed(message, embed).catch((err) => {
         log.error(`Failed to send AFK notification in Discord channel ${message.channelId}:`, err);
       });

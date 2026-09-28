@@ -140,4 +140,15 @@ describe('Discord Commands Registry and Executors', () => {
     expect(detailReplies).toHaveLength(1);
     expect(detailReplies[0].embeds![0].data.title).toContain('Help • +website');
   });
+
+  it('supports direct CLI afk scope (+afk global [reason]) and Easter egg (+afk discord [reason])', async () => {
+    const { message, replies } = createMockDiscordMessage('+afk discord Coding features', 'afk-cli-user-dc');
+    const cmd = getDiscordCommand('afk');
+    await cmd!.execute(message, ['discord', 'Coding', 'features']);
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0].embeds![0].data.title).toContain('TestUser is now AFK');
+    expect(replies[0].embeds![0].data.description).toContain('across all **Discord** servers');
+    expect(replies[0].embeds![0].data.description).toContain('Coding features');
+  });
 });
