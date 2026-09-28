@@ -133,7 +133,7 @@ export function saveSyncStore(): void {
     }));
 
     const document: SyncStoreDocumentV2 = {
-      version: '2.0.0',
+      version: '2.1.0',
       updatedAt: new Date().toISOString(),
       stats: {
         totalLinked: linksList.length,
@@ -342,7 +342,11 @@ export function migrateSyncStoreToV2(options: { backup?: boolean; filePath?: str
   }
 
   const isV1Array = Array.isArray(parsed);
-  const isV2 = parsed && typeof parsed === 'object' && parsed.version === '2.0.0' && Array.isArray(parsed.links);
+  const isV2 =
+    parsed &&
+    typeof parsed === 'object' &&
+    (parsed.version === '2.1.0' || parsed.version === '2.0.0') &&
+    Array.isArray(parsed.links);
 
   if (!isV1Array && isV2) {
     return { migrated: false, totalRecords: parsed.links.length };

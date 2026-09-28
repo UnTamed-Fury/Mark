@@ -327,7 +327,7 @@ export function saveAfkStore(): void {
     }
 
     const document: AfkStoreDocumentV2 = {
-      version: '2.0.0',
+      version: '2.1.0',
       updatedAt: new Date().toISOString(),
       stats: {
         totalActive: globalRecords.length + platformRecords.length + serverRecords.length,
@@ -619,7 +619,7 @@ export function migrateAfkStoreToV2(options: { backup?: boolean; filePath?: stri
   const isV2 =
     parsed &&
     typeof parsed === 'object' &&
-    parsed.version === '2.0.0' &&
+    (parsed.version === '2.1.0' || parsed.version === '2.0.0') &&
     Array.isArray(parsed.global) &&
     Array.isArray(parsed.server);
 
