@@ -32,7 +32,7 @@ describe('JSON v2 Data Architecture Test Suite', () => {
       expect(fs.existsSync(filePath)).toBe(true);
 
       const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-      expect(raw.version).toBe('2.1.0');
+      expect(raw.version).toBe('2.0.0');
       expect(typeof raw.updatedAt).toBe('string');
       expect(raw.stats.totalLinked).toBe(1);
       expect(Array.isArray(raw.links)).toBe(true);
@@ -74,7 +74,7 @@ describe('JSON v2 Data Architecture Test Suite', () => {
       const filePath = getAfkFilePath();
       const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 
-      expect(raw.version).toBe('2.1.0');
+      expect(raw.version).toBe('2.0.0');
       expect(raw.stats.totalActive).toBe(1);
       expect(raw.stats.globalCount).toBe(1);
       expect(raw.stats.serverCount).toBe(0);
@@ -141,7 +141,7 @@ describe('JSON v2 Data Architecture Test Suite', () => {
 
       const raw = JSON.parse(fs.readFileSync(getAfkFilePath(), 'utf-8'));
 
-      expect(raw.version).toBe('2.1.0');
+      expect(raw.version).toBe('2.0.0');
       expect(raw.stats.totalActive).toBe(8);
       expect(raw.stats.globalCount).toBe(3);
       expect(raw.stats.serverCount).toBe(5);

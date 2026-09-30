@@ -133,7 +133,7 @@ export function saveSyncStore(): void {
     }));
 
     const document: SyncStoreDocumentV2 = {
-      version: '2.1.0',
+      version: '2.0.0',
       updatedAt: new Date().toISOString(),
       stats: {
         totalLinked: linksList.length,

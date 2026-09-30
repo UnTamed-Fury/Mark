@@ -327,7 +327,7 @@ export function saveAfkStore(): void {
     }
 
     const document: AfkStoreDocumentV2 = {
-      version: '2.1.0',
+      version: '2.0.0',
       updatedAt: new Date().toISOString(),
       stats: {
         totalActive: globalRecords.length + platformRecords.length + serverRecords.length,
@@ -367,15 +367,18 @@ export function setAfk(
   reason: string,
   timestamp: number = Date.now(),
 ): AfkUserEntry {
-  // Clean any previous entries for this user
+  const linkedId = platform === 'discord' ? getLinkedFluxerId(userId) : getLinkedDiscordId(userId);
+
+  // Clean any previous entries for this user and their linked counterpart
   if (scope === 'global') {
     for (const [k, v] of afkStore.entries()) {
-      if (v.userId === userId) {
+      if (v.userId === userId || (linkedId && v.userId === linkedId)) {
         afkStore.delete(k);
       }
     }
   } else if (scope === 'platform') {
     afkStore.delete(`global:${userId}`);
+    if (linkedId) afkStore.delete(`global:${linkedId}`);
     afkStore.delete(`platform:${platform}:${userId}`);
     for (const [k, v] of afkStore.entries()) {
       if (v.userId === userId && v.platform === platform && v.scope === 'server') {
@@ -383,8 +386,13 @@ export function setAfk(
       }
     }
   } else {
+    // server scope
     afkStore.delete(`global:${userId}`);
+    if (linkedId) afkStore.delete(`global:${linkedId}`);
     afkStore.delete(`platform:${platform}:${userId}`);
+    if (guildId) {
+      afkStore.delete(`server:${platform}:${guildId}:${userId}`);
+    }
   }
 
   const entry: AfkUserEntry = {
@@ -401,21 +409,18 @@ export function setAfk(
   afkStore.set(key, entry);
 
   // If global AFK and user has a linked account on the other platform, mirror global AFK
-  if (scope === 'global') {
-    const linkedId = platform === 'discord' ? getLinkedFluxerId(userId) : getLinkedDiscordId(userId);
+  if (scope === 'global' && linkedId) {
     const otherPlatform = platform === 'discord' ? 'fluxer' : 'discord';
-    if (linkedId) {
-      const mirroredEntry: AfkUserEntry = {
-        userId: linkedId,
-        scope: 'global',
-        platform: otherPlatform,
-        guildId: null,
-        guildName: null,
-        reason: entry.reason,
-        timestamp,
-      };
-      afkStore.set(`global:${linkedId}`, mirroredEntry);
-    }
+    const mirroredEntry: AfkUserEntry = {
+      userId: linkedId,
+      scope: 'global',
+      platform: otherPlatform,
+      guildId: null,
+      guildName: null,
+      reason: entry.reason,
+      timestamp,
+    };
+    afkStore.set(`global:${linkedId}`, mirroredEntry);
   }
 
   emitAfkEvent({
@@ -443,7 +448,7 @@ export function getAfk(
   }
 
   // 2. Check linked account global entry
-  const linkedId = getLinkedFluxerId(userId) || getLinkedDiscordId(userId);
+  const linkedId = platform === 'discord' ? getLinkedFluxerId(userId) : getLinkedDiscordId(userId);
   if (linkedId) {
     const linkedGlobal = afkStore.get(`global:${linkedId}`);
     if (linkedGlobal) {
@@ -451,16 +456,10 @@ export function getAfk(
     }
   }
 
-  // 3. Check platform entry
+  // 3. Check platform entry (strictly for this platform)
   const platformEntry = afkStore.get(`platform:${platform}:${userId}`);
   if (platformEntry) {
     return platformEntry;
-  }
-  if (linkedId) {
-    const linkedPlatform = afkStore.get(`platform:${platform}:${linkedId}`);
-    if (linkedPlatform) {
-      return linkedPlatform;
-    }
   }
 
   // 4. Check server entry
@@ -493,17 +492,17 @@ export function clearAfk(
     return null;
   }
 
+  const linkedId = platform === 'discord' ? getLinkedFluxerId(userId) : getLinkedDiscordId(userId);
+
   const key = getStorageKey(entry.userId, entry.scope, entry.platform, entry.guildId);
   afkStore.delete(key);
   afkStore.delete(`global:${userId}`);
+  if (linkedId) {
+    afkStore.delete(`global:${linkedId}`);
+  }
   afkStore.delete(`platform:${platform}:${userId}`);
-
-  // If it was global, also clear linked account if present
-  if (entry.scope === 'global') {
-    const linkedId = getLinkedFluxerId(userId) || getLinkedDiscordId(userId);
-    if (linkedId) {
-      afkStore.delete(`global:${linkedId}`);
-    }
+  if (guildId) {
+    afkStore.delete(`server:${platform}:${guildId}:${userId}`);
   }
 
   const now = Date.now();

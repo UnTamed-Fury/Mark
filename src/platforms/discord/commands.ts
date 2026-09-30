@@ -201,18 +201,13 @@ const afkCommand: DiscordCommand = {
         time: 60_000,
       });
 
-      // Immediately acknowledge interaction within 3s window to prevent interaction failure
-      await interaction.deferUpdate().catch(() => {});
-
       if (interaction.customId.startsWith('afk_cancel_')) {
         const cancelEmbed = createBrandEmbed(message)
           .setTitle('AFK Cancelled')
           .setDescription('AFK setup was cancelled.');
-        try {
-          await interaction.editReply({ embeds: [cancelEmbed], components: [] });
-        } catch {
+        await interaction.update({ embeds: [cancelEmbed], components: [] }).catch(async () => {
           await promptMsg.edit({ embeds: [cancelEmbed], components: [] }).catch(() => {});
-        }
+        });
         return;
       }
 
@@ -234,13 +229,11 @@ const afkCommand: DiscordCommand = {
         );
 
       log.info(`Button AFK set for ${message.author.username} (${message.author.id}) [${scope}]: "${reason}"`);
-      try {
-        await interaction.editReply({ embeds: [successEmbed], components: [] });
-      } catch {
+      await interaction.update({ embeds: [successEmbed], components: [] }).catch(async () => {
         await promptMsg.edit({ embeds: [successEmbed], components: [] }).catch(() => {});
-      }
-    } catch (err) {
-      log.error('AFK interaction collector ended with error or timeout:', err);
+      });
+    } catch {
+      // Prompt timed out or collector ended; remove buttons cleanly
       await promptMsg.edit({ components: [] }).catch(() => {});
     }
   },

@@ -80,7 +80,7 @@ describe('Tests2: V1 to V2 Migration, Stress, Memory Efficiency & Railway Config
       loadSyncStore();
 
       const migratedJson = JSON.parse(fs.readFileSync(syncPath, 'utf-8'));
-      expect(migratedJson.version).toBe('2.1.0');
+      expect(migratedJson.version).toBe('2.0.0');
       expect(migratedJson.updatedAt).toBeDefined();
       expect(migratedJson.stats).toBeDefined();
       expect(migratedJson.stats.totalLinked).toBeGreaterThanOrEqual(2);
@@ -107,7 +107,7 @@ describe('Tests2: V1 to V2 Migration, Stress, Memory Efficiency & Railway Config
 
       // Verify v2 format
       const migratedDoc = JSON.parse(fs.readFileSync(afkPath, 'utf-8'));
-      expect(migratedDoc.version).toBe('2.1.0');
+      expect(migratedDoc.version).toBe('2.0.0');
       expect(Array.isArray(migratedDoc.global)).toBe(true);
       expect(Array.isArray(migratedDoc.server)).toBe(true);
 
@@ -151,7 +151,7 @@ describe('Tests2: V1 to V2 Migration, Stress, Memory Efficiency & Railway Config
 
       // Verify on-disk file remains valid
       const doc = JSON.parse(fs.readFileSync(afkPath, 'utf-8'));
-      expect(doc.version).toBe('2.1.0');
+      expect(doc.version).toBe('2.0.0');
       expect(doc.stats.globalCount).toBe(1);
     });
 
@@ -220,8 +220,8 @@ describe('Tests2: V1 to V2 Migration, Stress, Memory Efficiency & Railway Config
       const afkData = JSON.parse(fs.readFileSync(afkPath, 'utf-8'));
       const syncData = JSON.parse(fs.readFileSync(syncPath, 'utf-8'));
 
-      expect(afkData.version).toBe('2.1.0');
-      expect(syncData.version).toBe('2.1.0');
+      expect(afkData.version).toBe('2.0.0');
+      expect(syncData.version).toBe('2.0.0');
     });
 
     it('performs high-throughput multi-user lifecycle: 200 users set, check, and clear AFK', () => {
