@@ -130,20 +130,6 @@ export async function handleDiscordMessageCreate(message: Message): Promise<void
 
     if (!parsed.commandName) return;
 
-    // Server Gating: Mark only executes commands for the public in the primary AnimeX server.
-    // In showcase or secondary guilds, only the Owner (Fury) can use commands.
-    if (
-      message.guildId &&
-      config.discordServerId &&
-      message.guildId !== config.discordServerId &&
-      message.author.id !== config.ownerId
-    ) {
-      log.info(
-        `Blocked command '${parsed.commandName}' in showcase guild ${message.guildId} by non-owner ${message.author.id}`
-      );
-      return;
-    }
-
     const command = getDiscordCommand(parsed.commandName);
     if (!command) return;
 
